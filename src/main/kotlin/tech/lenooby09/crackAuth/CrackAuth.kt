@@ -51,7 +51,7 @@ class CrackAuth : ModInitializer {
 			val adminCode = AdminCommands.generateInviteCode(config.inviteCodeLength)
 			database.saveInviteCode(adminCode, "SYSTEM", System.currentTimeMillis(), 1)
 			LOGGER.info("  No accounts found. A one-time admin invite code has been generated:")
-			LOGGER.info("  One time register code: $adminCode <<<")
+			LOGGER.info("  One time register code: $adminCode")
 			LOGGER.info("  Use: /register $adminCode <username> <password>")
 		}
 
