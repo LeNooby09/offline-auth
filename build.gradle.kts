@@ -53,8 +53,21 @@ dependencies {
 
 	modImplementation("net.fabricmc.fabric-api:fabric-api:${project.property("fabric_version")}")
 
-	include(implementation("org.xerial:sqlite-jdbc:3.49.1.0")!!)
+	implementation("org.xerial:sqlite-jdbc:3.49.1.0")
 	include(implementation("at.favre.lib:bcrypt:0.10.2")!!)
+}
+
+tasks.jar {
+	from({
+		configurations.runtimeClasspath.get()
+			.filter { it.name.contains("sqlite-jdbc") }
+			.map { zipTree(it) }
+	}) {
+		exclude("META-INF/MANIFEST.MF")
+		exclude("META-INF/*.SF")
+		exclude("META-INF/*.DSA")
+		exclude("META-INF/*.RSA")
+	}
 }
 
 tasks.processResources {
