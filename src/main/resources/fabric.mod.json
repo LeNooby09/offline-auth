@@ -1,0 +1,33 @@
+{
+  "schemaVersion": 1,
+  "id": "crack-auth",
+  "version": "${version}",
+  "name": "crack-auth",
+  "description": "",
+  "authors": [],
+  "contact": {},
+  "license": "GPL-3.0",
+  "icon": "assets/crack-auth/icon.png",
+  "environment": "server",
+  "entrypoints": {
+    "fabric-datagen": [
+      "tech.lenooby09.crackAuth.client.CrackAuthDataGenerator"
+    ],
+    "main": [
+      "tech.lenooby09.crackAuth.CrackAuth"
+    ]
+  },
+  "mixins": [
+    "crack-auth.mixins.json",
+    {
+      "config": "crack-auth.client.mixins.json",
+      "environment": "client"
+    }
+  ],
+  "depends": {
+    "fabricloader": ">=${loader_version}",
+    "fabric-language-kotlin": ">=${kotlin_loader_version}",
+    "fabric-api": "*",
+    "minecraft": "${minecraft_version}"
+  }
+}
