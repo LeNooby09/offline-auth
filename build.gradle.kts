@@ -55,6 +55,7 @@ dependencies {
 
 	implementation("org.xerial:sqlite-jdbc:3.49.1.0")
 	include(implementation("at.favre.lib:bcrypt:0.10.2")!!)
+	include("at.favre.lib:bytes:1.5.0")
 }
 
 tasks.jar {
