@@ -6,6 +6,8 @@
   "mixins": [
     "CommandFilterMixin",
     "DisplayNameMixin",
+    "GameProfileAccessor",
+    "NameTagMixin",
     "PlayerMovementMixin",
     "ScoreboardNameMixin",
     "TabListDisplayNameMixin"

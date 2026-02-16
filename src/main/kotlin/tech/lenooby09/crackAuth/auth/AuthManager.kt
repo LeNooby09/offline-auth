@@ -1,8 +1,14 @@
 package tech.lenooby09.crackAuth.auth
 
+import com.mojang.authlib.GameProfile
 import net.minecraft.nbt.CompoundTag
 import net.minecraft.nbt.NbtIo
 import net.minecraft.network.chat.Component
+import net.minecraft.network.protocol.game.ClientboundPlayerInfoRemovePacket
+import net.minecraft.network.protocol.game.ClientboundPlayerInfoUpdatePacket
+import net.minecraft.network.protocol.game.ClientboundAddEntityPacket
+import net.minecraft.network.protocol.game.ClientboundRemoveEntitiesPacket
+import net.minecraft.network.protocol.game.ClientboundSetEntityDataPacket
 import net.minecraft.server.MinecraftServer
 import net.minecraft.server.level.ServerPlayer
 import net.minecraft.server.players.NameAndId
@@ -12,6 +18,7 @@ import net.minecraft.world.level.storage.TagValueInput
 import net.minecraft.world.level.storage.TagValueOutput
 import tech.lenooby09.crackAuth.CrackAuth
 import tech.lenooby09.crackAuth.config.CrackAuthConfig
+import tech.lenooby09.crackAuth.mixin.GameProfileAccessor
 import tech.lenooby09.crackAuth.storage.DatabaseManager
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
@@ -66,6 +73,7 @@ class AuthManager(val database: DatabaseManager, val config: CrackAuthConfig) {
 				activeAccountSessions[linkedAccount.id] = player.uuid
 				player.customName = Component.literal(linkedAccount.username)
 				player.isCustomNameVisible = true
+				updateGameProfileName(player, linkedAccount.username)
 			}
 
 			player.sendSystemMessage(Component.empty())
@@ -158,6 +166,9 @@ class AuthManager(val database: DatabaseManager, val config: CrackAuthConfig) {
 
 		player.customName = Component.literal(account.username)
 		player.isCustomNameVisible = true
+
+		// Swap GameProfile so the nametag above the head shows the auth username
+		updateGameProfileName(player, account.username)
 
 		// Restore inventory from account data
 		loadPlayerInventory(player, account)
@@ -319,6 +330,46 @@ class AuthManager(val database: DatabaseManager, val config: CrackAuthConfig) {
 		val bais = ByteArrayInputStream(bytes)
 		return DataInputStream(bais).use { dis ->
 			NbtIo.read(dis)
+		}
+	}
+
+	private fun updateGameProfileName(player: ServerPlayer, newName: String) {
+		val oldProfile = player.gameProfile
+		val newProfile = GameProfile(oldProfile.id, newName)
+		for ((key, value) in oldProfile.properties.entries()) {
+			newProfile.properties.put(key, value)
+		}
+		(player as GameProfileAccessor).setGameProfile(newProfile)
+
+		// Resend player info and respawn entity to all clients so the nametag updates
+		val srv = server ?: return
+		val infoRemovePacket = ClientboundPlayerInfoRemovePacket(listOf(player.uuid))
+		val infoAddPacket = ClientboundPlayerInfoUpdatePacket.createPlayerInitializing(listOf(player))
+		val entityRemovePacket = ClientboundRemoveEntitiesPacket(player.id)
+		val entityAddPacket = ClientboundAddEntityPacket(
+			player.id, player.uuid,
+			player.x, player.y, player.z,
+			player.xRot, player.yRot,
+			player.type, 0,
+			player.deltaMovement,
+			player.yHeadRot.toDouble()
+		)
+		val entityData = player.entityData.nonDefaultValues
+		for (other in srv.playerList.players) {
+			if (other === player) {
+				// For the player themselves, only update the tab list info
+				other.connection.send(infoRemovePacket)
+				other.connection.send(infoAddPacket)
+			} else {
+				// For other players, also respawn the entity to refresh the nametag
+				other.connection.send(entityRemovePacket)
+				other.connection.send(infoRemovePacket)
+				other.connection.send(infoAddPacket)
+				other.connection.send(entityAddPacket)
+				if (entityData != null) {
+					other.connection.send(ClientboundSetEntityDataPacket(player.id, entityData))
+				}
+			}
 		}
 	}
 
