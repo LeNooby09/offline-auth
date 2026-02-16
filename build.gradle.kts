@@ -41,11 +41,7 @@ fabricApi {
 }
 
 repositories {
-	// Add repositories to retrieve artifacts from in here.
-	// You should only use this when depending on other mods because
-	// Loom adds the essential maven repositories to download Minecraft and libraries from automatically.
-	// See https://docs.gradle.org/current/userguide/declaring_repositories.html
-	// for more information about repositories.
+	mavenCentral()
 }
 
 dependencies {
@@ -56,6 +52,9 @@ dependencies {
 	modImplementation("net.fabricmc:fabric-language-kotlin:${project.property("kotlin_loader_version")}")
 
 	modImplementation("net.fabricmc.fabric-api:fabric-api:${project.property("fabric_version")}")
+
+	include(implementation("org.xerial:sqlite-jdbc:3.49.1.0")!!)
+	include(implementation("at.favre.lib:bcrypt:0.10.2")!!)
 }
 
 tasks.processResources {
@@ -67,9 +66,9 @@ tasks.processResources {
 	filesMatching("fabric.mod.json") {
 		expand(
 			"version" to project.version,
-			"minecraft_version" to project.property("minecraft_version"),
-			"loader_version" to project.property("loader_version"),
-			"kotlin_loader_version" to project.property("kotlin_loader_version")
+			"minecraft_version" to project.property("minecraft_version") as String,
+			"loader_version" to project.property("loader_version") as String,
+			"kotlin_loader_version" to project.property("kotlin_loader_version") as String
 		)
 	}
 }
