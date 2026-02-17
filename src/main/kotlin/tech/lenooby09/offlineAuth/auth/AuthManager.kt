@@ -85,7 +85,13 @@ class AuthManager(val database: DatabaseManager, val config: OfflineAuthConfig) 
 		authStates[player.uuid] = AuthState.UNAUTHENTICATED
 
 		// Save original position and make player invisible/invulnerable in the sky
-		spawnPositions[player.uuid] = Triple(player.x, player.y, player.z)
+		// Check if there's a persisted spawn position from a previous unauthenticated disconnect
+		val savedPos = database.loadSpawnPosition(player.uuid)
+		val originalPos = savedPos ?: Triple(player.x, player.y, player.z)
+		spawnPositions[player.uuid] = originalPos
+		if (savedPos == null) {
+			database.saveSpawnPosition(player.uuid, player.x, player.y, player.z)
+		}
 		player.setInvisible(true)
 		player.setInvulnerable(true)
 
@@ -125,6 +131,10 @@ class AuthManager(val database: DatabaseManager, val config: OfflineAuthConfig) 
 			if (pos != null) {
 				player.teleportTo(pos.first, pos.second, pos.third)
 			}
+			// Keep the spawn position in the database for the next login
+		} else {
+			// Player was authenticated, clean up persisted spawn position
+			database.deleteSpawnPosition(player.uuid)
 		}
 		authStates.remove(player.uuid)
 		loginAttempts.remove(player.uuid)
@@ -179,6 +189,7 @@ class AuthManager(val database: DatabaseManager, val config: OfflineAuthConfig) 
 		if (pos != null) {
 			player.teleportTo(pos.first, pos.second, pos.third)
 		}
+		database.deleteSpawnPosition(player.uuid)
 		// Reset velocity and fall distance to prevent fall damage from sky teleport
 		player.deltaMovement = net.minecraft.world.phys.Vec3.ZERO
 		player.resetFallDistance()

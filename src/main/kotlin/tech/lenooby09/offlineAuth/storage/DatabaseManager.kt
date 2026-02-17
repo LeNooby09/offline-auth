@@ -75,6 +75,17 @@ class DatabaseManager(dbPath: Path) {
                 )
                 """.trimIndent()
 			)
+
+			stmt.executeUpdate(
+				"""
+                CREATE TABLE IF NOT EXISTS spawn_positions (
+                    minecraft_uuid TEXT PRIMARY KEY,
+                    x REAL NOT NULL,
+                    y REAL NOT NULL,
+                    z REAL NOT NULL
+                )
+                """.trimIndent()
+			)
 		}
 	}
 
@@ -271,6 +282,40 @@ class DatabaseManager(dbPath: Path) {
 		connection.createStatement().use { stmt ->
 			val rs = stmt.executeQuery("SELECT COUNT(*) FROM accounts")
 			return rs.next() && rs.getInt(1) > 0
+		}
+	}
+
+	fun saveSpawnPosition(minecraftUuid: UUID, x: Double, y: Double, z: Double) {
+		connection.prepareStatement(
+			"INSERT OR REPLACE INTO spawn_positions (minecraft_uuid, x, y, z) VALUES (?, ?, ?, ?)"
+		).use { stmt ->
+			stmt.setString(1, minecraftUuid.toString())
+			stmt.setDouble(2, x)
+			stmt.setDouble(3, y)
+			stmt.setDouble(4, z)
+			stmt.executeUpdate()
+		}
+	}
+
+	fun loadSpawnPosition(minecraftUuid: UUID): Triple<Double, Double, Double>? {
+		connection.prepareStatement(
+			"SELECT x, y, z FROM spawn_positions WHERE minecraft_uuid = ?"
+		).use { stmt ->
+			stmt.setString(1, minecraftUuid.toString())
+			val rs = stmt.executeQuery()
+			if (rs.next()) {
+				return Triple(rs.getDouble("x"), rs.getDouble("y"), rs.getDouble("z"))
+			}
+		}
+		return null
+	}
+
+	fun deleteSpawnPosition(minecraftUuid: UUID) {
+		connection.prepareStatement(
+			"DELETE FROM spawn_positions WHERE minecraft_uuid = ?"
+		).use { stmt ->
+			stmt.setString(1, minecraftUuid.toString())
+			stmt.executeUpdate()
 		}
 	}
 
