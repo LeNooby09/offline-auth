@@ -90,6 +90,7 @@ class DatabaseManager(dbPath: Path) {
                     account_id TEXT PRIMARY KEY,
                     inventory_data BLOB,
                     ender_chest_data BLOB,
+                    equipment_data BLOB,
                     updated_at INTEGER NOT NULL,
                     FOREIGN KEY (account_id) REFERENCES accounts(id)
                 )
@@ -213,6 +214,23 @@ class DatabaseManager(dbPath: Path) {
 						stmt.executeUpdate("ALTER TABLE spawn_positions ADD COLUMN dimension TEXT NOT NULL DEFAULT 'minecraft:overworld'")
 					}
 				}
+			}
+
+			migratePlayerDataSchema(conn)
+		}
+	}
+
+	private fun migratePlayerDataSchema(conn: Connection) {
+		val pdColumns = mutableSetOf<String>()
+		conn.createStatement().use { stmt ->
+			val rs = stmt.executeQuery("PRAGMA table_info(player_data)")
+			while (rs.next()) {
+				pdColumns.add(rs.getString("name"))
+			}
+		}
+		if (pdColumns.isNotEmpty() && "equipment_data" !in pdColumns) {
+			conn.createStatement().use { stmt ->
+				stmt.executeUpdate("ALTER TABLE player_data ADD COLUMN equipment_data BLOB")
 			}
 		}
 	}
@@ -389,29 +407,32 @@ class DatabaseManager(dbPath: Path) {
 		}
 	}
 
-	fun savePlayerData(accountId: UUID, inventoryData: ByteArray?, enderChestData: ByteArray?) {
+	fun savePlayerData(accountId: UUID, inventoryData: ByteArray?, enderChestData: ByteArray?, equipmentData: ByteArray?) {
 		connection().use { conn ->
 			conn.prepareStatement(
-				"INSERT OR REPLACE INTO player_data (account_id, inventory_data, ender_chest_data, updated_at) VALUES (?, ?, ?, ?)"
+				"INSERT OR REPLACE INTO player_data (account_id, inventory_data, ender_chest_data, equipment_data, updated_at) VALUES (?, ?, ?, ?, ?)"
 			).use { stmt ->
 				stmt.setString(1, accountId.toString())
 				stmt.setBytes(2, inventoryData)
 				stmt.setBytes(3, enderChestData)
-				stmt.setLong(4, System.currentTimeMillis())
+				stmt.setBytes(4, equipmentData)
+				stmt.setLong(5, System.currentTimeMillis())
 				stmt.executeUpdate()
 			}
 		}
 	}
 
-	fun loadPlayerData(accountId: UUID): Pair<ByteArray?, ByteArray?>? {
+	data class PlayerData(val inventoryData: ByteArray?, val enderChestData: ByteArray?, val equipmentData: ByteArray?)
+
+	fun loadPlayerData(accountId: UUID): PlayerData? {
 		connection().use { conn ->
 			conn.prepareStatement(
-				"SELECT inventory_data, ender_chest_data FROM player_data WHERE account_id = ?"
+				"SELECT inventory_data, ender_chest_data, equipment_data FROM player_data WHERE account_id = ?"
 			).use { stmt ->
 				stmt.setString(1, accountId.toString())
 				val rs = stmt.executeQuery()
 				if (rs.next()) {
-					return Pair(rs.getBytes("inventory_data"), rs.getBytes("ender_chest_data"))
+					return PlayerData(rs.getBytes("inventory_data"), rs.getBytes("ender_chest_data"), rs.getBytes("equipment_data"))
 				}
 			}
 		}

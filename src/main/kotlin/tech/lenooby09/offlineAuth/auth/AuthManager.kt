@@ -14,10 +14,14 @@ import net.minecraft.server.level.ServerPlayer
 import net.minecraft.server.players.NameAndId
 import net.minecraft.util.ProblemReporter
 import net.minecraft.world.ItemStackWithSlot
+import net.minecraft.world.entity.EntityEquipment
+import net.minecraft.world.entity.EquipmentSlot
+import net.minecraft.world.item.ItemStack
 import net.minecraft.world.level.storage.TagValueInput
 import net.minecraft.world.level.storage.TagValueOutput
 import tech.lenooby09.offlineAuth.OfflineAuth
 import tech.lenooby09.offlineAuth.config.OfflineAuthConfig
+import tech.lenooby09.offlineAuth.mixin.EquipmentAccessor
 import tech.lenooby09.offlineAuth.mixin.GameProfileAccessor
 import tech.lenooby09.offlineAuth.storage.DatabaseManager
 import java.io.ByteArrayInputStream
@@ -491,8 +495,14 @@ class AuthManager(val database: DatabaseManager, var config: OfflineAuthConfig) 
 			val ecTag = ecOutput.buildResult()
 			val ecBytes = compressTag(ecTag)
 
+			// Serialize equipment (armor + offhand)
+			val eqOutput = TagValueOutput.createWithContext(reporter, registryAccess)
+			eqOutput.store("equipment", EntityEquipment.CODEC, (player as EquipmentAccessor).equipment)
+			val eqTag = eqOutput.buildResult()
+			val eqBytes = compressTag(eqTag)
+
 			// Offload the DB write after serialization is done on the main thread
-			runAsyncFire { database.savePlayerData(account.id, invBytes, ecBytes) }
+			runAsyncFire { database.savePlayerData(account.id, invBytes, ecBytes, eqBytes) }
 		} catch (e: Exception) {
 			OfflineAuth.LOGGER.error("Failed to save inventory for account ${account.username}", e)
 		}
@@ -501,24 +511,36 @@ class AuthManager(val database: DatabaseManager, var config: OfflineAuthConfig) 
 	private fun loadPlayerInventory(player: ServerPlayer, account: AuthAccount) {
 		try {
 			val data = database.loadPlayerData(account.id) ?: return
-			val (invBytes, ecBytes) = data
 			val registryAccess = server!!.registryAccess()
 			val reporter = ProblemReporter.DISCARDING
 
 			// Load inventory
-			if (invBytes != null) {
-				val invTag = decompressTag(invBytes)
+			if (data.inventoryData != null) {
+				val invTag = decompressTag(data.inventoryData)
 				val invInput = TagValueInput.create(reporter, registryAccess, invTag)
 				player.inventory.clearContent()
 				player.inventory.load(invInput.listOrEmpty("Items", ItemStackWithSlot.CODEC))
 			}
 
 			// Load ender chest
-			if (ecBytes != null) {
-				val ecTag = decompressTag(ecBytes)
+			if (data.enderChestData != null) {
+				val ecTag = decompressTag(data.enderChestData)
 				val ecInput = TagValueInput.create(reporter, registryAccess, ecTag)
 				player.enderChestInventory.clearContent()
 				player.enderChestInventory.fromSlots(ecInput.listOrEmpty("Items", ItemStackWithSlot.CODEC))
+			}
+
+			// Load equipment (armor + offhand)
+			if (data.equipmentData != null) {
+				val eqTag = decompressTag(data.equipmentData)
+				val eqInput = TagValueInput.create(reporter, registryAccess, eqTag)
+				val loaded = eqInput.read("equipment", EntityEquipment.CODEC)
+				loaded.ifPresent { eq -> (player as EquipmentAccessor).equipment.setAll(eq) }
+			} else {
+				// Clear equipment if no data saved (prevents stale armor/offhand)
+				for (slot in EquipmentSlot.entries) {
+					player.setItemSlot(slot, ItemStack.EMPTY)
+				}
 			}
 
 			// Sync to client
