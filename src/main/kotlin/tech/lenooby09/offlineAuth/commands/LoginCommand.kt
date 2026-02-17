@@ -46,11 +46,7 @@ object LoginCommand {
 	private fun executeSimple(ctx: CommandContext<CommandSourceStack>, authManager: AuthManager): Int {
 		val player = ctx.source.playerOrException
 		val password = getString(ctx, "password")
-
-		if (authManager.authStates[player.uuid] == AuthState.AUTHENTICATED) {
-			player.sendSystemMessage(Component.literal("§cAlready authenticated."))
-			return 0
-		}
+		val alreadyAuthenticated = authManager.authStates[player.uuid] == AuthState.AUTHENTICATED
 
 		val account = authManager.database.getAccountByMinecraftUUID(player.uuid)
 		if (account == null) {
@@ -65,6 +61,9 @@ object LoginCommand {
 			return handleFailedLogin(player, authManager)
 		}
 
+		if (alreadyAuthenticated) {
+			authManager.prepareAccountSwitch(player)
+		}
 		authManager.onAuthenticated(player, account)
 		player.sendSystemMessage(Component.literal("§aLogged in as §e${account.username}§a!"))
 		return 1
@@ -74,11 +73,7 @@ object LoginCommand {
 		val player = ctx.source.playerOrException
 		val username = getString(ctx, "username")
 		val password = getString(ctx, "password")
-
-		if (authManager.authStates[player.uuid] == AuthState.AUTHENTICATED) {
-			player.sendSystemMessage(Component.literal("§cAlready authenticated."))
-			return 0
-		}
+		val alreadyAuthenticated = authManager.authStates[player.uuid] == AuthState.AUTHENTICATED
 
 		val account = authManager.database.getAccountByUsername(username)
 		if (account == null) {
@@ -91,6 +86,9 @@ object LoginCommand {
 			return handleFailedLogin(player, authManager)
 		}
 
+		if (alreadyAuthenticated) {
+			authManager.prepareAccountSwitch(player)
+		}
 		authManager.onAuthenticated(player, account)
 		player.sendSystemMessage(Component.literal("§aLogged in as §e${account.username}§a!"))
 		return 1

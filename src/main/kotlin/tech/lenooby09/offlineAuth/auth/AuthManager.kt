@@ -116,9 +116,10 @@ class AuthManager(val database: DatabaseManager, val config: OfflineAuthConfig) 
 	fun onPlayerDisconnect(player: ServerPlayer) {
 		cancelKickTimer(player.uuid)
 
-		// Save inventory for authenticated players before disconnect
+		// Save inventory and position for authenticated players before disconnect
 		val account = accountMap.remove(player.uuid)
 		if (account != null && isAuthenticated(player.uuid)) {
+			saveAccountPosition(player, account)
 			savePlayerInventory(player, account)
 			activeAccountSessions.remove(account.id, player.uuid)
 		}
@@ -146,8 +147,9 @@ class AuthManager(val database: DatabaseManager, val config: OfflineAuthConfig) 
 		if (existingPlayerUuid != null && existingPlayerUuid != newPlayerUuid) {
 			val existingPlayer = server?.playerList?.getPlayer(existingPlayerUuid)
  			if (existingPlayer != null) {
-				// Save existing player's inventory before kicking
+				// Save existing player's inventory and position before kicking
 				if (isAuthenticated(existingPlayerUuid)) {
+					saveAccountPosition(existingPlayer, account)
 					savePlayerInventory(existingPlayer, account)
 				}
 				authStates.remove(existingPlayerUuid)
@@ -160,6 +162,19 @@ class AuthManager(val database: DatabaseManager, val config: OfflineAuthConfig) 
 					Component.literal("§cYour account was logged in from another session.")
 				)
 			}
+		}
+	}
+
+	/**
+	 * Prepares an already-authenticated player for switching to a different account.
+	 * Saves the current account's inventory and cleans up the old session mapping.
+	 */
+	fun prepareAccountSwitch(player: ServerPlayer) {
+		val oldAccount = accountMap[player.uuid]
+		if (oldAccount != null) {
+			saveAccountPosition(player, oldAccount)
+			savePlayerInventory(player, oldAccount)
+			activeAccountSessions.remove(oldAccount.id, player.uuid)
 		}
 	}
 
@@ -183,12 +198,22 @@ class AuthManager(val database: DatabaseManager, val config: OfflineAuthConfig) 
 		// Restore inventory from account data
 		loadPlayerInventory(player, account)
 
-		// Restore player: visible, vulnerable, back to original position
+		// Restore player: visible, vulnerable, back to account's saved position or original position
 		player.setInvisible(false)
-		val pos = spawnPositions.remove(player.uuid)
-		if (pos != null) {
-			player.teleportTo(pos.first, pos.second, pos.third)
+		val accountPos = database.loadAccountPosition(account.id)
+		if (accountPos != null) {
+			player.teleportTo(
+				player.level() as net.minecraft.server.level.ServerLevel,
+				accountPos.x, accountPos.y, accountPos.z,
+				emptySet(), accountPos.yaw, accountPos.pitch, false
+			)
+		} else {
+			val pos = spawnPositions.remove(player.uuid)
+			if (pos != null) {
+				player.teleportTo(pos.first, pos.second, pos.third)
+			}
 		}
+		spawnPositions.remove(player.uuid)
 		database.deleteSpawnPosition(player.uuid)
 		// Reset velocity and fall distance to prevent fall damage from sky teleport
 		player.deltaMovement = net.minecraft.world.phys.Vec3.ZERO
@@ -274,6 +299,10 @@ class AuthManager(val database: DatabaseManager, val config: OfflineAuthConfig) 
 	}
 
 	// --- Inventory serialization ---
+
+	private fun saveAccountPosition(player: ServerPlayer, account: AuthAccount) {
+		database.saveAccountPosition(account.id, player.x, player.y, player.z, player.yRot, player.xRot)
+	}
 
 	private fun savePlayerInventory(player: ServerPlayer, account: AuthAccount) {
 		try {

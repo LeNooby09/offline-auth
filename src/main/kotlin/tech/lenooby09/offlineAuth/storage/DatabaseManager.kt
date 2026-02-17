@@ -15,6 +15,7 @@ class DatabaseManager(dbPath: Path) {
 		connection = DriverManager.getConnection("jdbc:sqlite:${dbPath.toAbsolutePath()}")
 		connection.autoCommit = true
 		createTables()
+		migrateSchema()
 	}
 
 	private fun createTables() {
@@ -86,6 +87,43 @@ class DatabaseManager(dbPath: Path) {
                 )
                 """.trimIndent()
 			)
+
+			stmt.executeUpdate(
+				"""
+                CREATE TABLE IF NOT EXISTS account_positions (
+                    account_id TEXT PRIMARY KEY,
+                    x REAL NOT NULL,
+                    y REAL NOT NULL,
+                    z REAL NOT NULL,
+                    yaw REAL NOT NULL DEFAULT 0,
+                    pitch REAL NOT NULL DEFAULT 0,
+                    FOREIGN KEY (account_id) REFERENCES accounts(id)
+                )
+                """.trimIndent()
+			)
+		}
+	}
+
+	private fun migrateSchema() {
+		// Add yaw/pitch columns to account_positions if they don't exist (migration from older schema)
+		val columns = mutableSetOf<String>()
+		connection.createStatement().use { stmt ->
+			val rs = stmt.executeQuery("PRAGMA table_info(account_positions)")
+			while (rs.next()) {
+				columns.add(rs.getString("name"))
+			}
+		}
+		if (columns.isNotEmpty()) {
+			if ("yaw" !in columns) {
+				connection.createStatement().use { stmt ->
+					stmt.executeUpdate("ALTER TABLE account_positions ADD COLUMN yaw REAL NOT NULL DEFAULT 0")
+				}
+			}
+			if ("pitch" !in columns) {
+				connection.createStatement().use { stmt ->
+					stmt.executeUpdate("ALTER TABLE account_positions ADD COLUMN pitch REAL NOT NULL DEFAULT 0")
+				}
+			}
 		}
 	}
 
@@ -263,6 +301,10 @@ class DatabaseManager(dbPath: Path) {
 		val account = getAccountByUsername(username) ?: return false
 		val accountId = account.id.toString()
 
+		connection.prepareStatement("DELETE FROM account_positions WHERE account_id = ?").use { stmt ->
+			stmt.setString(1, accountId)
+			stmt.executeUpdate()
+		}
 		connection.prepareStatement("DELETE FROM player_data WHERE account_id = ?").use { stmt ->
 			stmt.setString(1, accountId)
 			stmt.executeUpdate()
@@ -326,6 +368,49 @@ class DatabaseManager(dbPath: Path) {
 			"DELETE FROM spawn_positions WHERE minecraft_uuid = ?"
 		).use { stmt ->
 			stmt.setString(1, minecraftUuid.toString())
+			stmt.executeUpdate()
+		}
+	}
+
+	// --- Account position operations ---
+
+	fun saveAccountPosition(accountId: UUID, x: Double, y: Double, z: Double, yaw: Float, pitch: Float) {
+		connection.prepareStatement(
+			"INSERT OR REPLACE INTO account_positions (account_id, x, y, z, yaw, pitch) VALUES (?, ?, ?, ?, ?, ?)"
+		).use { stmt ->
+			stmt.setString(1, accountId.toString())
+			stmt.setDouble(2, x)
+			stmt.setDouble(3, y)
+			stmt.setDouble(4, z)
+			stmt.setFloat(5, yaw)
+			stmt.setFloat(6, pitch)
+			stmt.executeUpdate()
+		}
+	}
+
+	data class AccountPosition(val x: Double, val y: Double, val z: Double, val yaw: Float, val pitch: Float)
+
+	fun loadAccountPosition(accountId: UUID): AccountPosition? {
+		connection.prepareStatement(
+			"SELECT x, y, z, yaw, pitch FROM account_positions WHERE account_id = ?"
+		).use { stmt ->
+			stmt.setString(1, accountId.toString())
+			val rs = stmt.executeQuery()
+			if (rs.next()) {
+				return AccountPosition(
+					rs.getDouble("x"), rs.getDouble("y"), rs.getDouble("z"),
+					rs.getFloat("yaw"), rs.getFloat("pitch")
+				)
+			}
+		}
+		return null
+	}
+
+	fun deleteAccountPosition(accountId: UUID) {
+		connection.prepareStatement(
+			"DELETE FROM account_positions WHERE account_id = ?"
+		).use { stmt ->
+			stmt.setString(1, accountId.toString())
 			stmt.executeUpdate()
 		}
 	}
