@@ -395,7 +395,7 @@ class AuthManager(val database: DatabaseManager, var config: OfflineAuthConfig) 
 
 	private fun extractAddress(player: ServerPlayer): String? {
 		return try {
-			val connField = player.connection.javaClass.superclass.getDeclaredField("connection")
+			val connField = net.minecraft.server.network.ServerCommonPacketListenerImpl::class.java.getDeclaredField("connection")
 			connField.isAccessible = true
 			val connection = connField.get(player.connection) as net.minecraft.network.Connection
 			val address = connection.remoteAddress?.toString()?.substringBefore(":")?.removePrefix("/")
