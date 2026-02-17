@@ -158,6 +158,15 @@ class DatabaseManager(dbPath: Path) {
                 )
                 """.trimIndent()
 				)
+
+				stmt.executeUpdate(
+					"""
+                CREATE TABLE IF NOT EXISTS soft_bans (
+                    ip_address TEXT PRIMARY KEY,
+                    expires_at INTEGER NOT NULL
+                )
+                """.trimIndent()
+				)
 			}
 		}
 	}
@@ -698,6 +707,55 @@ class DatabaseManager(dbPath: Path) {
 			).use { stmt ->
 				stmt.setString(1, newPasswordHash)
 				stmt.setString(2, accountId.toString())
+				stmt.executeUpdate()
+			}
+		}
+	}
+
+	// --- Soft-ban operations ---
+
+	fun saveSoftBan(ipAddress: String, expiresAt: Long) {
+		connection().use { conn ->
+			conn.prepareStatement(
+				"INSERT OR REPLACE INTO soft_bans (ip_address, expires_at) VALUES (?, ?)"
+			).use { stmt ->
+				stmt.setString(1, ipAddress)
+				stmt.setLong(2, expiresAt)
+				stmt.executeUpdate()
+			}
+		}
+	}
+
+	fun getActiveSoftBan(ipAddress: String): Long? {
+		connection().use { conn ->
+			conn.prepareStatement(
+				"SELECT expires_at FROM soft_bans WHERE ip_address = ? AND expires_at > ?"
+			).use { stmt ->
+				stmt.setString(1, ipAddress)
+				stmt.setLong(2, System.currentTimeMillis())
+				val rs = stmt.executeQuery()
+				return if (rs.next()) rs.getLong("expires_at") else null
+			}
+		}
+	}
+
+	fun removeSoftBan(ipAddress: String) {
+		connection().use { conn ->
+			conn.prepareStatement(
+				"DELETE FROM soft_bans WHERE ip_address = ?"
+			).use { stmt ->
+				stmt.setString(1, ipAddress)
+				stmt.executeUpdate()
+			}
+		}
+	}
+
+	fun cleanExpiredSoftBans() {
+		connection().use { conn ->
+			conn.prepareStatement(
+				"DELETE FROM soft_bans WHERE expires_at <= ?"
+			).use { stmt ->
+				stmt.setLong(1, System.currentTimeMillis())
 				stmt.executeUpdate()
 			}
 		}

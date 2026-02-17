@@ -13,6 +13,13 @@ import tech.lenooby09.offlineAuth.auth.AuthAccount
 import tech.lenooby09.offlineAuth.auth.AuthManager
 import tech.lenooby09.offlineAuth.auth.AuthState
 
+private sealed class LoginResult {
+	data class Success(val account: AuthAccount) : LoginResult()
+	data class Failed(val account: AuthAccount) : LoginResult()
+	data class Error(val message: String) : LoginResult()
+	data class Lockout(val message: Component) : LoginResult()
+}
+
 object LoginCommand {
 
 	fun register(dispatcher: CommandDispatcher<CommandSourceStack>, authManager: AuthManager) {
@@ -49,34 +56,40 @@ object LoginCommand {
 		val password = getString(ctx, "password")
 		val alreadyAuthenticated = authManager.authStates[player.uuid] == AuthState.AUTHENTICATED
 
-		val account = authManager.database.getAccountByMinecraftUUID(player.uuid)
-		if (account == null) {
-			player.sendSystemMessage(
-				Component.literal("§cNo account linked to this client. Use §e/login_as <username> <password> §cor §e/register §cfirst.")
-			)
-			return 0
-		}
+		player.sendSystemMessage(Component.literal("§7Authenticating..."))
 
-		// Check per-account lockout before verifying password
-		val lockoutMsg = checkAccountLockout(account, authManager)
-		if (lockoutMsg != null) {
-			player.sendSystemMessage(lockoutMsg)
-			return 0
-		}
+		// Offload DB lookup + BCrypt verify to the IO executor
+		authManager.runAsync({
+			val account = authManager.database.getAccountByMinecraftUUID(player.uuid)
+				?: return@runAsync LoginResult.Error("§cNo account linked to this client. Use §e/login_as <username> <password> §cor §e/register §cfirst.")
 
-		val result = BCrypt.verifyer().verify(password.toCharArray(), account.passwordHash)
-		if (!result.verified) {
-			return handleFailedLogin(player, authManager, account)
-		}
+			val lockoutMsg = checkAccountLockout(account, authManager)
+			if (lockoutMsg != null) {
+				return@runAsync LoginResult.Lockout(lockoutMsg)
+			}
 
-		// Successful login — reset per-account lockout
-		authManager.database.resetLoginAttempts(account.id)
+			val result = BCrypt.verifyer().verify(password.toCharArray(), account.passwordHash)
+			if (!result.verified) {
+				return@runAsync LoginResult.Failed(account)
+			}
 
-		if (alreadyAuthenticated) {
-			authManager.prepareAccountSwitch(player)
-		}
-		authManager.onAuthenticated(player, account)
-		player.sendSystemMessage(Component.literal("§aLogged in as §e${account.username}§a!"))
+			authManager.database.resetLoginAttempts(account.id)
+			LoginResult.Success(account)
+		}, { result ->
+			when (result) {
+				is LoginResult.Error -> player.sendSystemMessage(Component.literal(result.message))
+				is LoginResult.Lockout -> player.sendSystemMessage(result.message)
+				is LoginResult.Failed -> handleFailedLogin(player, authManager, result.account)
+				is LoginResult.Success -> {
+					if (alreadyAuthenticated) {
+						authManager.prepareAccountSwitch(player)
+					}
+					authManager.onAuthenticated(player, result.account)
+					player.sendSystemMessage(Component.literal("§aLogged in as §e${result.account.username}§a!"))
+				}
+			}
+		})
+
 		return 1
 	}
 
@@ -86,32 +99,40 @@ object LoginCommand {
 		val password = getString(ctx, "password")
 		val alreadyAuthenticated = authManager.authStates[player.uuid] == AuthState.AUTHENTICATED
 
-		val account = authManager.database.getAccountByUsername(username)
-		if (account == null) {
-			player.sendSystemMessage(Component.literal("§cAccount not found."))
-			return 0
-		}
+		player.sendSystemMessage(Component.literal("§7Authenticating..."))
 
-		// Check per-account lockout before verifying password
-		val lockoutMsg = checkAccountLockout(account, authManager)
-		if (lockoutMsg != null) {
-			player.sendSystemMessage(lockoutMsg)
-			return 0
-		}
+		// Offload DB lookup + BCrypt verify to the IO executor
+		authManager.runAsync({
+			val account = authManager.database.getAccountByUsername(username)
+				?: return@runAsync LoginResult.Error("§cAccount not found.")
 
-		val result = BCrypt.verifyer().verify(password.toCharArray(), account.passwordHash)
-		if (!result.verified) {
-			return handleFailedLogin(player, authManager, account)
-		}
+			val lockoutMsg = checkAccountLockout(account, authManager)
+			if (lockoutMsg != null) {
+				return@runAsync LoginResult.Lockout(lockoutMsg)
+			}
 
-		// Successful login — reset per-account lockout
-		authManager.database.resetLoginAttempts(account.id)
+			val result = BCrypt.verifyer().verify(password.toCharArray(), account.passwordHash)
+			if (!result.verified) {
+				return@runAsync LoginResult.Failed(account)
+			}
 
-		if (alreadyAuthenticated) {
-			authManager.prepareAccountSwitch(player)
-		}
-		authManager.onAuthenticated(player, account)
-		player.sendSystemMessage(Component.literal("§aLogged in as §e${account.username}§a!"))
+			authManager.database.resetLoginAttempts(account.id)
+			LoginResult.Success(account)
+		}, { result ->
+			when (result) {
+				is LoginResult.Error -> player.sendSystemMessage(Component.literal(result.message))
+				is LoginResult.Lockout -> player.sendSystemMessage(result.message)
+				is LoginResult.Failed -> handleFailedLogin(player, authManager, result.account)
+				is LoginResult.Success -> {
+					if (alreadyAuthenticated) {
+						authManager.prepareAccountSwitch(player)
+					}
+					authManager.onAuthenticated(player, result.account)
+					player.sendSystemMessage(Component.literal("§aLogged in as §e${result.account.username}§a!"))
+				}
+			}
+		})
+
 		return 1
 	}
 

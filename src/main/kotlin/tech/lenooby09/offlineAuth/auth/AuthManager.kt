@@ -29,6 +29,7 @@ import net.minecraft.resources.ResourceKey
 import net.minecraft.resources.Identifier
 import java.util.*
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 import java.util.concurrent.ScheduledFuture
 import java.util.concurrent.TimeUnit
@@ -43,8 +44,6 @@ class AuthManager(val database: DatabaseManager, var config: OfflineAuthConfig) 
 	private val warningTimers = ConcurrentHashMap<UUID, MutableList<ScheduledFuture<*>>>()
 	private val scheduler = Executors.newScheduledThreadPool(1)
 
-	private val softBans = ConcurrentHashMap<String, Long>()
-
 	// Registration rate-limiting: IP -> (attempt count, first attempt timestamp)
 	private val registerAttempts = ConcurrentHashMap<String, Pair<Int, Long>>()
 	// Registration IP cooldowns: IP -> cooldown expiry timestamp
@@ -55,8 +54,25 @@ class AuthManager(val database: DatabaseManager, var config: OfflineAuthConfig) 
 
 	private var server: MinecraftServer? = null
 
+	// IO executor for offloading BCrypt hashing and database operations off the main thread
+	val ioExecutor: ExecutorService = Executors.newFixedThreadPool(4)
+
 	data class SpawnPos(val x: Double, val y: Double, val z: Double, val dimension: String)
 	private val spawnPositions = ConcurrentHashMap<UUID, SpawnPos>()
+
+	init {
+		// Clean up expired soft-bans on startup
+		database.cleanExpiredSoftBans()
+		// Periodically clean expired soft-bans and sessions
+		scheduler.scheduleAtFixedRate({
+			try {
+				database.cleanExpiredSoftBans()
+				database.cleanExpiredSessions()
+			} catch (e: Exception) {
+				OfflineAuth.LOGGER.error("Failed to clean expired data", e)
+			}
+		}, 1, 1, TimeUnit.HOURS)
+	}
 
 
 	fun isAuthenticated(player: ServerPlayer): Boolean {
@@ -137,7 +153,8 @@ class AuthManager(val database: DatabaseManager, var config: OfflineAuthConfig) 
 		}
 		spawnPositions[player.uuid] = originalPos
 		if (savedPos == null) {
-			database.saveSpawnPosition(player.uuid, player.x, player.y, player.z, dimension)
+			val px = player.x; val py = player.y; val pz = player.z
+			runAsyncFire { database.saveSpawnPosition(player.uuid, px, py, pz, dimension) }
 		}
 		player.setInvisible(true)
 		player.setInvulnerable(true)
@@ -187,7 +204,7 @@ class AuthManager(val database: DatabaseManager, var config: OfflineAuthConfig) 
 			// Keep the spawn position in the database for the next login
 		} else {
 			// Player was authenticated, clean up persisted spawn position
-			database.deleteSpawnPosition(player.uuid)
+			runAsyncFire { database.deleteSpawnPosition(player.uuid) }
 		}
 		authStates.remove(player.uuid)
 		loginAttempts.remove(player.uuid)
@@ -239,7 +256,7 @@ class AuthManager(val database: DatabaseManager, var config: OfflineAuthConfig) 
 		cancelKickTimer(player.uuid)
 		loginAttempts.remove(player.uuid)
 
-		database.linkMinecraftAccount(player.uuid, account.id)
+		runAsyncFire { database.linkMinecraftAccount(player.uuid, account.id) }
 
 		player.customName = Component.literal(account.username)
 		player.isCustomNameVisible = true
@@ -278,7 +295,7 @@ class AuthManager(val database: DatabaseManager, var config: OfflineAuthConfig) 
 			}
 		}
 		spawnPositions.remove(player.uuid)
-		database.deleteSpawnPosition(player.uuid)
+		runAsyncFire { database.deleteSpawnPosition(player.uuid) }
 		// Reset velocity and fall distance to prevent fall damage from sky teleport
 		player.deltaMovement = net.minecraft.world.phys.Vec3.ZERO
 		player.resetFallDistance()
@@ -344,7 +361,7 @@ class AuthManager(val database: DatabaseManager, var config: OfflineAuthConfig) 
 	 */
 	fun recordRegistrationIp(player: ServerPlayer, accountId: UUID) {
 		val ip = extractAddress(player) ?: return
-		database.saveRegistrationIp(accountId, ip)
+		runAsyncFire { database.saveRegistrationIp(accountId, ip) }
 	}
 
 	/**
@@ -363,20 +380,16 @@ class AuthManager(val database: DatabaseManager, var config: OfflineAuthConfig) 
 	}
 
 	fun isSoftBanned(address: String): Component? {
-		val banExpiry = softBans[address] ?: return null
-		if (System.currentTimeMillis() < banExpiry) {
-			val remaining = (banExpiry - System.currentTimeMillis()) / 1000
-			return Component.literal("§cYou are temporarily banned. Try again in ${remaining}s.")
-		} else {
-			softBans.remove(address)
-			return null
-		}
+		val banExpiry = database.getActiveSoftBan(address) ?: return null
+		val remaining = (banExpiry - System.currentTimeMillis()) / 1000
+		return Component.literal("§cYou are temporarily banned. Try again in ${remaining}s.")
 	}
 
 	private fun softBan(player: ServerPlayer) {
 		val address = extractAddress(player)
 		if (address != null) {
-			softBans[address] = System.currentTimeMillis() + (config.softBanMinutes * 60 * 1000)
+			val expiresAt = System.currentTimeMillis() + (config.softBanMinutes * 60 * 1000)
+			runAsyncFire { database.saveSoftBan(address, expiresAt) }
 		}
 	}
 
@@ -439,8 +452,10 @@ class AuthManager(val database: DatabaseManager, var config: OfflineAuthConfig) 
 			val ip = extractAddress(player)
 			if (ip != null) {
 				val expiresAt = System.currentTimeMillis() + (config.sessionDurationMinutes * 60 * 1000)
-				database.saveSession(account.id, ip, expiresAt)
-				OfflineAuth.LOGGER.info("Saved session for ${account.username} from IP $ip (expires in ${config.sessionDurationMinutes} min)")
+				runAsyncFire {
+					database.saveSession(account.id, ip, expiresAt)
+					OfflineAuth.LOGGER.info("Saved session for ${account.username} from IP $ip (expires in ${config.sessionDurationMinutes} min)")
+				}
 			} else {
 				OfflineAuth.LOGGER.warn("Could not save session for ${account.username}: failed to extract IP address")
 			}
@@ -456,7 +471,9 @@ class AuthManager(val database: DatabaseManager, var config: OfflineAuthConfig) 
 
 	private fun saveAccountPosition(player: ServerPlayer, account: AuthAccount) {
 		val dimension = player.level().dimension().identifier().toString()
-		database.saveAccountPosition(account.id, player.x, player.y, player.z, player.yRot, player.xRot, dimension)
+		val x = player.x; val y = player.y; val z = player.z
+		val yaw = player.yRot; val pitch = player.xRot
+		runAsyncFire { database.saveAccountPosition(account.id, x, y, z, yaw, pitch, dimension) }
 	}
 
 	private fun savePlayerInventory(player: ServerPlayer, account: AuthAccount) {
@@ -476,7 +493,8 @@ class AuthManager(val database: DatabaseManager, var config: OfflineAuthConfig) 
 			val ecTag = ecOutput.buildResult()
 			val ecBytes = compressTag(ecTag)
 
-			database.savePlayerData(account.id, invBytes, ecBytes)
+			// Offload the DB write after serialization is done on the main thread
+			runAsyncFire { database.savePlayerData(account.id, invBytes, ecBytes) }
 		} catch (e: Exception) {
 			OfflineAuth.LOGGER.error("Failed to save inventory for account ${account.username}", e)
 		}
@@ -568,8 +586,46 @@ class AuthManager(val database: DatabaseManager, var config: OfflineAuthConfig) 
 		}
 	}
 
+	/**
+	 * Runs a block asynchronously on the IO executor, then executes the callback on the main server thread.
+	 * Use this to offload BCrypt hashing and database operations off the main/network thread.
+	 */
+	fun <T> runAsync(asyncWork: () -> T, onMainThread: (T) -> Unit) {
+		val srv = server ?: return
+		ioExecutor.submit {
+			try {
+				val result = asyncWork()
+				srv.execute { onMainThread(result) }
+			} catch (e: Exception) {
+				OfflineAuth.LOGGER.error("Async operation failed", e)
+			}
+		}
+	}
+
+	/**
+	 * Runs a block asynchronously on the IO executor with no main-thread callback.
+	 * Use this for fire-and-forget database writes.
+	 */
+	fun runAsyncFire(asyncWork: () -> Unit) {
+		ioExecutor.submit {
+			try {
+				asyncWork()
+			} catch (e: Exception) {
+				OfflineAuth.LOGGER.error("Async fire-and-forget operation failed", e)
+			}
+		}
+	}
+
 	fun shutdown() {
 		scheduler.shutdownNow()
+		ioExecutor.shutdown()
+		try {
+			if (!ioExecutor.awaitTermination(5, TimeUnit.SECONDS)) {
+				ioExecutor.shutdownNow()
+			}
+		} catch (_: InterruptedException) {
+			ioExecutor.shutdownNow()
+		}
 		database.close()
 	}
 }

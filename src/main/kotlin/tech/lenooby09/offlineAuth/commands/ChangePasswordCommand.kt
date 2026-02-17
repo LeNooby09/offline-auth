@@ -43,28 +43,38 @@ object ChangePasswordCommand {
 			return 0
 		}
 
-		val result = BCrypt.verifyer().verify(oldPassword.toCharArray(), account.passwordHash)
-		if (!result.verified) {
-			player.sendSystemMessage(Component.literal("§cIncorrect current password."))
-			return 0
-		}
-
 		if (newPassword.length < authManager.config.minPasswordLength) {
 			player.sendSystemMessage(Component.literal("§cNew password must be at least ${authManager.config.minPasswordLength} characters."))
 			return 0
 		}
 
-		val newHash = BCrypt.withDefaults().hashToString(12, newPassword.toCharArray())
+		player.sendSystemMessage(Component.literal("§7Changing password..."))
 
-		try {
-			authManager.database.updatePasswordHash(account.id, newHash)
+		// Offload BCrypt verify + hash + DB write to the IO executor
+		authManager.runAsync({
+			val result = BCrypt.verifyer().verify(oldPassword.toCharArray(), account.passwordHash)
+			if (!result.verified) {
+				return@runAsync null to "§cIncorrect current password."
+			}
+
+			val newHash = BCrypt.withDefaults().hashToString(12, newPassword.toCharArray())
+
+			try {
+				authManager.database.updatePasswordHash(account.id, newHash)
+				newHash to null
+			} catch (e: Exception) {
+				null to "§cFailed to change password. Please try again."
+			}
+		}, { (newHash, errorMsg) ->
+			if (errorMsg != null) {
+				player.sendSystemMessage(Component.literal(errorMsg))
+				return@runAsync
+			}
+
 			// Update the in-memory account with the new hash
-			authManager.accountMap[player.uuid] = account.copy(passwordHash = newHash)
+			authManager.accountMap[player.uuid] = account.copy(passwordHash = newHash!!)
 			player.sendSystemMessage(Component.literal("§aPassword changed successfully."))
-		} catch (e: Exception) {
-			player.sendSystemMessage(Component.literal("§cFailed to change password. Please try again."))
-			return 0
-		}
+		})
 
 		return 1
 	}

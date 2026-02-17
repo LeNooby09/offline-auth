@@ -56,17 +56,6 @@ object RegisterCommand {
 		// Record this attempt for rate-limiting (even if invite code is wrong)
 		authManager.recordRegisterAttempt(player)
 
-		val code = authManager.database.getInviteCode(inviteCode)
-		if (code == null || code.currentUses >= code.maxUses) {
-			player.sendSystemMessage(Component.literal("§cInvalid or expired invite code."))
-			return 0
-		}
-
-		if (authManager.database.getAccountByUsername(username) != null) {
-			player.sendSystemMessage(Component.literal("§cUsername already taken."))
-			return 0
-		}
-
 		if (username.length < 3 || username.length > 16) {
 			player.sendSystemMessage(Component.literal("§cUsername must be between 3 and 16 characters."))
 			return 0
@@ -82,26 +71,45 @@ object RegisterCommand {
 			return 0
 		}
 
-		val account = AuthAccount(
-			id = UUID.randomUUID(),
-			username = username,
-			passwordHash = BCrypt.withDefaults().hashToString(12, password.toCharArray()),
-			registeredAt = System.currentTimeMillis(),
-		)
+		player.sendSystemMessage(Component.literal("§7Registering..."))
 
-		try {
-			authManager.database.saveAccount(account)
-			authManager.database.useInviteCode(inviteCode, username)
-			// Track registration IP for max-accounts-per-IP enforcement
-			authManager.recordRegistrationIp(player, account.id)
-		} catch (e: Exception) {
-			player.sendSystemMessage(Component.literal("§cRegistration failed. Please try again."))
-			return 0
-		}
+		// Offload BCrypt hashing and DB writes to the IO executor
+		authManager.runAsync({
+			val code = authManager.database.getInviteCode(inviteCode)
+			if (code == null || code.currentUses >= code.maxUses) {
+				return@runAsync "§cInvalid or expired invite code." to null
+			}
 
-		authManager.onAuthenticated(player, account)
+			if (authManager.database.getAccountByUsername(username) != null) {
+				return@runAsync "§cUsername already taken." to null
+			}
 
-		player.sendSystemMessage(Component.literal("§aRegistered and logged in as §e${account.username}§a!"))
+			val account = AuthAccount(
+				id = UUID.randomUUID(),
+				username = username,
+				passwordHash = BCrypt.withDefaults().hashToString(12, password.toCharArray()),
+				registeredAt = System.currentTimeMillis(),
+			)
+
+			try {
+				authManager.database.saveAccount(account)
+				authManager.database.useInviteCode(inviteCode, username)
+				authManager.recordRegistrationIp(player, account.id)
+			} catch (e: Exception) {
+				return@runAsync "§cRegistration failed. Please try again." to null
+			}
+
+			null to account
+		}, { (errorMsg, account) ->
+			if (errorMsg != null) {
+				player.sendSystemMessage(Component.literal(errorMsg))
+				return@runAsync
+			}
+
+			authManager.onAuthenticated(player, account!!)
+			player.sendSystemMessage(Component.literal("§aRegistered and logged in as §e${account.username}§a!"))
+		})
+
 		return 1
 	}
 }

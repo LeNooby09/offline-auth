@@ -147,45 +147,55 @@ object AdminCommands {
 	): Int {
 		val username = getString(ctx, "username")
 		val password = getString(ctx, "password")
+		val source = ctx.source
 
-		if (username.length < 3 || username.length > 16) {
-			ctx.source.sendFailure(Component.literal("§cUsername must be between 3 and 16 characters."))
+		if (username.length !in 3..16) {
+			source.sendFailure(Component.literal("§cUsername must be between 3 and 16 characters."))
 			return 0
 		}
 
 		if (!username.matches(Regex("^[a-zA-Z0-9_]+$"))) {
-			ctx.source.sendFailure(Component.literal("§cUsername can only contain letters, numbers, and underscores."))
+			source.sendFailure(Component.literal("§cUsername can only contain letters, numbers, and underscores."))
 			return 0
 		}
 
 		if (password.length < authManager.config.minPasswordLength) {
-			ctx.source.sendFailure(Component.literal("§cPassword must be at least ${authManager.config.minPasswordLength} characters."))
+			source.sendFailure(Component.literal("§cPassword must be at least ${authManager.config.minPasswordLength} characters."))
 			return 0
 		}
 
-		if (authManager.database.getAccountByUsername(username) != null) {
-			ctx.source.sendFailure(Component.literal("§cUsername already taken."))
-			return 0
-		}
+		source.sendSuccess({ Component.literal("§7Creating user...") }, false)
 
-		val account = AuthAccount(
-			id = UUID.randomUUID(),
-			username = username,
-			passwordHash = BCrypt.withDefaults().hashToString(12, password.toCharArray()),
-			registeredAt = System.currentTimeMillis(),
-		)
+		// Offload BCrypt hashing and DB writes to the IO executor
+		authManager.runAsync({
+			if (authManager.database.getAccountByUsername(username) != null) {
+				return@runAsync "§cUsername already taken."
+			}
 
-		try {
-			authManager.database.saveAccount(account)
-		} catch (e: Exception) {
-			ctx.source.sendFailure(Component.literal("§cFailed to create user. Please try again."))
-			return 0
-		}
+			val account = AuthAccount(
+				id = UUID.randomUUID(),
+				username = username,
+				passwordHash = BCrypt.withDefaults().hashToString(12, password.toCharArray()),
+				registeredAt = System.currentTimeMillis(),
+			)
 
-		ctx.source.sendSuccess(
-			{ Component.literal("§aCreated user: §e$username") },
-			false
-		)
+			try {
+				authManager.database.saveAccount(account)
+				null
+			} catch (e: Exception) {
+				"§cFailed to create user. Please try again."
+			}
+		}, { errorMsg ->
+			if (errorMsg != null) {
+				source.sendFailure(Component.literal(errorMsg))
+			} else {
+				source.sendSuccess(
+					{ Component.literal("§aCreated user: §e$username") },
+					false
+				)
+			}
+		})
+
 		return 1
 	}
 
