@@ -278,6 +278,17 @@ class DatabaseManager(dbPath: Path) {
 		return true
 	}
 
+	fun getAllUsernames(): List<String> {
+		val usernames = mutableListOf<String>()
+		connection.createStatement().use { stmt ->
+			val rs = stmt.executeQuery("SELECT username FROM accounts")
+			while (rs.next()) {
+				usernames.add(rs.getString("username"))
+			}
+		}
+		return usernames
+	}
+
 	fun hasAnyAccounts(): Boolean {
 		connection.createStatement().use { stmt ->
 			val rs = stmt.executeQuery("SELECT COUNT(*) FROM accounts")

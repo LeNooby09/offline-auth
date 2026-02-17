@@ -6,9 +6,11 @@ import com.mojang.brigadier.arguments.IntegerArgumentType
 import com.mojang.brigadier.arguments.StringArgumentType.getString
 import com.mojang.brigadier.arguments.StringArgumentType.string
 import com.mojang.brigadier.context.CommandContext
+import com.mojang.brigadier.suggestion.SuggestionProvider
 import net.minecraft.commands.CommandSourceStack
 import net.minecraft.commands.Commands.argument
 import net.minecraft.commands.Commands.literal
+import net.minecraft.commands.SharedSuggestionProvider
 import net.minecraft.network.chat.Component
 import net.minecraft.server.permissions.Permissions
 import tech.lenooby09.offlineAuth.auth.AuthAccount
@@ -28,6 +30,17 @@ object AdminCommands {
 	}
 
 	fun register(dispatcher: CommandDispatcher<CommandSourceStack>, authManager: AuthManager) {
+		val suggestUsernames = SuggestionProvider<CommandSourceStack> { _, builder ->
+			SharedSuggestionProvider.suggest(authManager.database.getAllUsernames(), builder)
+		}
+
+		val suggestInviteCodes = SuggestionProvider<CommandSourceStack> { _, builder ->
+			SharedSuggestionProvider.suggest(
+				authManager.database.getActiveInviteCodes().map { it.code },
+				builder
+			)
+		}
+
 		dispatcher.register(
 			literal("offlineauth")
 				.requires { it.permissions().hasPermission(Permissions.COMMANDS_OWNER) }
@@ -50,6 +63,7 @@ object AdminCommands {
 					literal("revoke")
 						.then(
 							argument("code", string())
+								.suggests(suggestInviteCodes)
 								.executes { ctx -> revokeCode(ctx, authManager) }
 						)
 				)
@@ -67,6 +81,7 @@ object AdminCommands {
 					literal("deleteuser")
 						.then(
 							argument("username", string())
+								.suggests(suggestUsernames)
 								.executes { ctx -> deleteUser(ctx, authManager) }
 						)
 				)
