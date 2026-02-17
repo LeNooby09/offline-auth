@@ -21,11 +21,6 @@ object LoginCommand {
 				.then(
 					argument("password", string())
 						.executes { ctx -> executeSimple(ctx, authManager) }
-						.then(
-							// This branch won't trigger because string() is greedy...
-							// So we use a separate command tree below
-							argument("_dummy", string()).executes { ctx -> executeSimple(ctx, authManager) }
-						)
 				)
 		)
 		dispatcher.register(
