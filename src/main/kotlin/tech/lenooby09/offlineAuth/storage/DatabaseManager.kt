@@ -125,6 +125,18 @@ class DatabaseManager(dbPath: Path) {
 
 				stmt.executeUpdate(
 					"""
+                CREATE TABLE IF NOT EXISTS registration_ips (
+                    account_id TEXT NOT NULL,
+                    ip_address TEXT NOT NULL,
+                    registered_at INTEGER NOT NULL,
+                    PRIMARY KEY (account_id),
+                    FOREIGN KEY (account_id) REFERENCES accounts(id)
+                )
+                """.trimIndent()
+				)
+
+				stmt.executeUpdate(
+					"""
                 CREATE TABLE IF NOT EXISTS auth_sessions (
                     account_id TEXT NOT NULL,
                     ip_address TEXT NOT NULL,
@@ -395,9 +407,11 @@ class DatabaseManager(dbPath: Path) {
 				if (!rs.next()) return false
 
 				val accountId = rs.getString("id")
-				conn.prepareStatement("DELETE FROM player_data WHERE account_id = ?").use { it.setString(1, accountId); it.executeUpdate() }
+ 			conn.prepareStatement("DELETE FROM player_data WHERE account_id = ?").use { it.setString(1, accountId); it.executeUpdate() }
 				conn.prepareStatement("DELETE FROM account_links WHERE account_id = ?").use { it.setString(1, accountId); it.executeUpdate() }
 				conn.prepareStatement("DELETE FROM account_positions WHERE account_id = ?").use { it.setString(1, accountId); it.executeUpdate() }
+				conn.prepareStatement("DELETE FROM registration_ips WHERE account_id = ?").use { it.setString(1, accountId); it.executeUpdate() }
+				conn.prepareStatement("DELETE FROM auth_sessions WHERE account_id = ?").use { it.setString(1, accountId); it.executeUpdate() }
 				conn.prepareStatement("DELETE FROM accounts WHERE id = ?").use { it.setString(1, accountId); it.executeUpdate() }
 				return true
 			}
@@ -574,6 +588,33 @@ class DatabaseManager(dbPath: Path) {
 			).use { stmt ->
 				stmt.setLong(1, System.currentTimeMillis())
 				stmt.executeUpdate()
+			}
+		}
+	}
+
+	// --- Registration IP tracking ---
+
+	fun saveRegistrationIp(accountId: UUID, ipAddress: String) {
+		connection().use { conn ->
+			conn.prepareStatement(
+				"INSERT OR REPLACE INTO registration_ips (account_id, ip_address, registered_at) VALUES (?, ?, ?)"
+			).use { stmt ->
+				stmt.setString(1, accountId.toString())
+				stmt.setString(2, ipAddress)
+				stmt.setLong(3, System.currentTimeMillis())
+				stmt.executeUpdate()
+			}
+		}
+	}
+
+	fun countAccountsByIp(ipAddress: String): Int {
+		connection().use { conn ->
+			conn.prepareStatement(
+				"SELECT COUNT(*) FROM registration_ips WHERE ip_address = ?"
+			).use { stmt ->
+				stmt.setString(1, ipAddress)
+				val rs = stmt.executeQuery()
+				return if (rs.next()) rs.getInt(1) else 0
 			}
 		}
 	}

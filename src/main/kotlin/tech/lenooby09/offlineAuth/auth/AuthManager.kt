@@ -45,6 +45,11 @@ class AuthManager(val database: DatabaseManager, var config: OfflineAuthConfig) 
 
 	private val softBans = ConcurrentHashMap<String, Long>()
 
+	// Registration rate-limiting: IP -> (attempt count, first attempt timestamp)
+	private val registerAttempts = ConcurrentHashMap<String, Pair<Int, Long>>()
+	// Registration IP cooldowns: IP -> cooldown expiry timestamp
+	private val registerCooldowns = ConcurrentHashMap<String, Long>()
+
 	// Reverse mapping: account ID -> currently logged-in player UUID
 	private val activeAccountSessions = ConcurrentHashMap<UUID, UUID>()
 
@@ -284,6 +289,66 @@ class AuthManager(val database: DatabaseManager, var config: OfflineAuthConfig) 
 		// Store session for "remember me" feature
 		storeSessionForPlayer(player, account)
 	}
+
+	/**
+	 * Checks if a registration attempt from the given IP is allowed.
+	 * Returns null if allowed, or an error message Component if denied.
+	 */
+	fun checkRegisterRateLimit(player: ServerPlayer): Component? {
+		val ip = extractAddress(player) ?: return null // can't rate-limit without IP
+
+		// Check cooldown
+		val cooldownExpiry = registerCooldowns[ip]
+		if (cooldownExpiry != null) {
+			if (System.currentTimeMillis() < cooldownExpiry) {
+				val remaining = (cooldownExpiry - System.currentTimeMillis()) / 1000
+				return Component.literal("§cToo many registration attempts. Try again in ${remaining}s.")
+			} else {
+				registerCooldowns.remove(ip)
+				registerAttempts.remove(ip)
+			}
+		}
+
+		// Check max accounts per IP
+		if (config.maxAccountsPerIp > 0) {
+			val count = database.countAccountsByIp(ip)
+			if (count >= config.maxAccountsPerIp) {
+				return Component.literal("§cMaximum number of accounts (${config.maxAccountsPerIp}) reached for your IP address.")
+			}
+		}
+
+		return null
+	}
+
+	/**
+	 * Records a registration attempt from the given player's IP.
+	 * If the limit is exceeded, a cooldown is applied.
+	 */
+	fun recordRegisterAttempt(player: ServerPlayer) {
+		val ip = extractAddress(player) ?: return
+		val now = System.currentTimeMillis()
+		val (count, firstAttempt) = registerAttempts.getOrDefault(ip, Pair(0, now))
+		val newCount = count + 1
+		registerAttempts[ip] = Pair(newCount, firstAttempt)
+
+		if (newCount >= config.maxRegisterAttemptsPerIp) {
+			registerCooldowns[ip] = now + (config.registerCooldownSeconds * 1000)
+			registerAttempts.remove(ip)
+		}
+	}
+
+	/**
+	 * Records a successful registration from the given player's IP for account-per-IP tracking.
+	 */
+	fun recordRegistrationIp(player: ServerPlayer, accountId: UUID) {
+		val ip = extractAddress(player) ?: return
+		database.saveRegistrationIp(accountId, ip)
+	}
+
+	/**
+	 * Extracts the IP address from a player connection (public for use in commands).
+	 */
+	fun getPlayerIp(player: ServerPlayer): String? = extractAddress(player)
 
 	fun freezePlayer(player: ServerPlayer) {
 		val pos = spawnPositions[player.uuid] ?: return

@@ -12,6 +12,8 @@ import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 import tech.lenooby09.offlineAuth.OfflineAuth;
 
+import java.util.Set;
+
 @Mixin(ServerGamePacketListenerImpl.class)
 public abstract class CommandFilterMixin {
 
@@ -28,14 +30,33 @@ public abstract class CommandFilterMixin {
         filterCommand(packet.command(), ci);
     }
 
+    private static final Set<String> AUTH_COMMANDS = Set.of(
+            "register", "r", "login", "l", "login_as", "ls", "changepassword"
+    );
+
+    private static final Set<String> SENSITIVE_COMMANDS = Set.of(
+            "login", "l", "login_as", "ls", "register", "r", "changepassword"
+    );
+
     private void filterCommand(String command, CallbackInfo ci) {
         if (OfflineAuth.Companion.getAuthManager() == null) return;
 
         ServerPlayer player = getPlayer();
+
+        // Suppress server-side logging of commands containing passwords
+        String cmd = command.toLowerCase().split(" ")[0];
+        if (SENSITIVE_COMMANDS.contains(cmd)) {
+            // Cancel the default handling and execute the command manually
+            // This prevents the command from being logged in server logs with arguments
+            ci.cancel();
+            var sourceStack = player.createCommandSourceStack();
+            sourceStack.getServer().getCommands().performPrefixedCommand(sourceStack, command);
+            return;
+        }
+
         if (OfflineAuth.Companion.getAuthManager().isAuthenticated(player)) return;
 
-        String cmd = command.toLowerCase().split(" ")[0];
-        if (cmd.equals("register") || cmd.equals("r") || cmd.equals("login") || cmd.equals("l") || cmd.equals("login_as") || cmd.equals("ls")) {
+        if (AUTH_COMMANDS.contains(cmd)) {
             return;
         }
 

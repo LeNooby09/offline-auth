@@ -46,6 +46,16 @@ object RegisterCommand {
 			return 0
 		}
 
+		// Rate-limit and IP-based registration checks
+		val rateLimitMsg = authManager.checkRegisterRateLimit(player)
+		if (rateLimitMsg != null) {
+			player.sendSystemMessage(rateLimitMsg)
+			return 0
+		}
+
+		// Record this attempt for rate-limiting (even if invite code is wrong)
+		authManager.recordRegisterAttempt(player)
+
 		val code = authManager.database.getInviteCode(inviteCode)
 		if (code == null || code.currentUses >= code.maxUses) {
 			player.sendSystemMessage(Component.literal("§cInvalid or expired invite code."))
@@ -82,6 +92,8 @@ object RegisterCommand {
 		try {
 			authManager.database.saveAccount(account)
 			authManager.database.useInviteCode(inviteCode, username)
+			// Track registration IP for max-accounts-per-IP enforcement
+			authManager.recordRegistrationIp(player, account.id)
 		} catch (e: Exception) {
 			player.sendSystemMessage(Component.literal("§cRegistration failed. Please try again."))
 			return 0

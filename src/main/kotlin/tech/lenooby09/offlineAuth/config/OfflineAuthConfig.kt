@@ -14,6 +14,9 @@ data class OfflineAuthConfig(
 	val inviteCodeLength: Int = 10,
 	val sessionPersistenceEnabled: Boolean = false,
 	val sessionDurationMinutes: Long = 1440L,
+	val maxRegisterAttemptsPerIp: Int = 5,
+	val registerCooldownSeconds: Long = 60L,
+	val maxAccountsPerIp: Int = 3,
 ) {
 
 	companion object {
@@ -30,6 +33,9 @@ data class OfflineAuthConfig(
 			"invite-code-length" to "# Length of generated invite codes (number of alphanumeric characters, excluding dashes)",
 			"session-persistence-enabled" to "# Whether players stay authenticated across reconnects from the same IP",
 			"session-duration-minutes" to "# How long a session persists in minutes (default: 1440 = 24 hours)",
+			"max-register-attempts-per-ip" to "# Maximum registration attempts per IP before cooldown kicks in",
+			"register-cooldown-seconds" to "# Cooldown in seconds after max registration attempts from the same IP",
+			"max-accounts-per-ip" to "# Maximum number of accounts that can be registered from a single IP address (0 = unlimited)",
 		)
 
 		fun load(configDir: Path): OfflineAuthConfig {
@@ -66,6 +72,9 @@ data class OfflineAuthConfig(
 					inviteCodeLength = values["invite-code-length"]?.toIntOrNull()?.coerceAtLeast(4) ?: 10,
 					sessionPersistenceEnabled = values["session-persistence-enabled"]?.toBooleanStrictOrNull() ?: false,
 					sessionDurationMinutes = values["session-duration-minutes"]?.toLongOrNull() ?: 1440L,
+					maxRegisterAttemptsPerIp = values["max-register-attempts-per-ip"]?.toIntOrNull() ?: 5,
+					registerCooldownSeconds = values["register-cooldown-seconds"]?.toLongOrNull() ?: 60L,
+					maxAccountsPerIp = values["max-accounts-per-ip"]?.toIntOrNull() ?: 3,
 				)
 			} catch (e: Exception) {
 				OfflineAuth.LOGGER.error("Failed to load config, using defaults", e)
@@ -88,6 +97,9 @@ data class OfflineAuthConfig(
 			"invite-code-length" to inviteCodeLength.toString(),
 			"session-persistence-enabled" to sessionPersistenceEnabled.toString(),
 			"session-duration-minutes" to sessionDurationMinutes.toString(),
+			"max-register-attempts-per-ip" to maxRegisterAttemptsPerIp.toString(),
+			"register-cooldown-seconds" to registerCooldownSeconds.toString(),
+			"max-accounts-per-ip" to maxAccountsPerIp.toString(),
 		)
 
 		val builder = StringBuilder()

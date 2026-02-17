@@ -17,15 +17,17 @@ import tech.lenooby09.offlineAuth.OfflineAuth
 import tech.lenooby09.offlineAuth.auth.AuthAccount
 import tech.lenooby09.offlineAuth.auth.AuthManager
 import tech.lenooby09.offlineAuth.config.OfflineAuthConfig
+import java.security.SecureRandom
 import java.util.*
 
 object AdminCommands {
 
 	private val CODE_CHARS = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+	private val secureRandom = SecureRandom()
 
 	fun generateInviteCode(length: Int): String {
 		val chars = buildString {
-			repeat(length) { append(CODE_CHARS.random()) }
+			repeat(length) { append(CODE_CHARS[secureRandom.nextInt(CODE_CHARS.length)]) }
 		}
 		// Insert dashes every 4 characters for readability
 		return chars.chunked(4).joinToString("-")
