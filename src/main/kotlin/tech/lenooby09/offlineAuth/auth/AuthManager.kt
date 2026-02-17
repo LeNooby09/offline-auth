@@ -247,10 +247,8 @@ class AuthManager(val database: DatabaseManager, var config: OfflineAuthConfig) 
 		// Swap GameProfile so the nametag above the head shows the auth username
 		updateGameProfileName(player, account.username)
 
-		// Restore inventory from account data
-		loadPlayerInventory(player, account)
-
-		// Restore player: visible, vulnerable, back to account's saved position or original position
+		// Teleport player to their saved position BEFORE restoring inventory,
+		// so items don't briefly exist at the sky holding position
 		player.setInvisible(false)
 		val accountPos = database.loadAccountPosition(account.id)
 		if (accountPos != null) {
@@ -284,6 +282,10 @@ class AuthManager(val database: DatabaseManager, var config: OfflineAuthConfig) 
 		// Reset velocity and fall distance to prevent fall damage from sky teleport
 		player.deltaMovement = net.minecraft.world.phys.Vec3.ZERO
 		player.resetFallDistance()
+
+		// Restore inventory AFTER teleporting to the correct position
+		loadPlayerInventory(player, account)
+
 		player.setInvulnerable(false)
 
 		// Store session for "remember me" feature

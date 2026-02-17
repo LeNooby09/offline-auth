@@ -146,6 +146,18 @@ class DatabaseManager(dbPath: Path) {
                 )
                 """.trimIndent()
 				)
+
+				stmt.executeUpdate(
+					"""
+                CREATE TABLE IF NOT EXISTS login_attempts (
+                    account_id TEXT PRIMARY KEY,
+                    failed_count INTEGER NOT NULL DEFAULT 0,
+                    last_failed_at INTEGER NOT NULL DEFAULT 0,
+                    locked_until INTEGER NOT NULL DEFAULT 0,
+                    FOREIGN KEY (account_id) REFERENCES accounts(id)
+                )
+                """.trimIndent()
+				)
 			}
 		}
 	}
@@ -620,6 +632,64 @@ class DatabaseManager(dbPath: Path) {
 	}
 
 	// --- Password operations ---
+
+	// --- Login attempt tracking ---
+
+	data class LoginAttemptRecord(
+		val failedCount: Int,
+		val lastFailedAt: Long,
+		val lockedUntil: Long,
+	)
+
+	fun getLoginAttempts(accountId: UUID): LoginAttemptRecord? {
+		connection().use { conn ->
+			conn.prepareStatement(
+				"SELECT failed_count, last_failed_at, locked_until FROM login_attempts WHERE account_id = ?"
+			).use { stmt ->
+				stmt.setString(1, accountId.toString())
+				val rs = stmt.executeQuery()
+				if (rs.next()) {
+					return LoginAttemptRecord(
+						failedCount = rs.getInt("failed_count"),
+						lastFailedAt = rs.getLong("last_failed_at"),
+						lockedUntil = rs.getLong("locked_until"),
+					)
+				}
+			}
+		}
+		return null
+	}
+
+	fun recordFailedLogin(accountId: UUID, lockedUntil: Long) {
+		connection().use { conn ->
+			conn.prepareStatement(
+				"""
+				INSERT INTO login_attempts (account_id, failed_count, last_failed_at, locked_until)
+				VALUES (?, 1, ?, ?)
+				ON CONFLICT(account_id) DO UPDATE SET
+					failed_count = failed_count + 1,
+					last_failed_at = excluded.last_failed_at,
+					locked_until = excluded.locked_until
+				""".trimIndent()
+			).use { stmt ->
+				stmt.setString(1, accountId.toString())
+				stmt.setLong(2, System.currentTimeMillis())
+				stmt.setLong(3, lockedUntil)
+				stmt.executeUpdate()
+			}
+		}
+	}
+
+	fun resetLoginAttempts(accountId: UUID) {
+		connection().use { conn ->
+			conn.prepareStatement(
+				"DELETE FROM login_attempts WHERE account_id = ?"
+			).use { stmt ->
+				stmt.setString(1, accountId.toString())
+				stmt.executeUpdate()
+			}
+		}
+	}
 
 	fun updatePasswordHash(accountId: UUID, newPasswordHash: String) {
 		connection().use { conn ->

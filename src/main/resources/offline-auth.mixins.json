@@ -7,6 +7,8 @@
     "CommandFilterMixin",
     "DisplayNameMixin",
     "GameProfileAccessor",
+    "InventoryClickMixin",
+    "ItemDropMixin",
     "NameTagMixin",
     "PlayerMovementMixin",
     "ScoreboardNameMixin",
