@@ -395,9 +395,7 @@ class AuthManager(val database: DatabaseManager, var config: OfflineAuthConfig) 
 
 	private fun extractAddress(player: ServerPlayer): String? {
 		return try {
-			val connField = net.minecraft.server.network.ServerCommonPacketListenerImpl::class.java.getDeclaredField("connection")
-			connField.isAccessible = true
-			val connection = connField.get(player.connection) as net.minecraft.network.Connection
+			val connection = (player.connection as tech.lenooby09.offlineAuth.mixin.ConnectionAccessor).connection
 			val address = connection.remoteAddress?.toString()?.substringBefore(":")?.removePrefix("/")
 			address
 		} catch (e: Exception) {

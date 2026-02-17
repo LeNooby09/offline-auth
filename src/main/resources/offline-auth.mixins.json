@@ -5,6 +5,7 @@
   "compatibilityLevel": "JAVA_21",
   "mixins": [
     "CommandFilterMixin",
+    "ConnectionAccessor",
     "DisplayNameMixin",
     "GameProfileAccessor",
     "InventoryClickMixin",
