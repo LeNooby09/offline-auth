@@ -54,6 +54,8 @@ dependencies {
 	modImplementation("net.fabricmc.fabric-api:fabric-api:${project.property("fabric_version")}")
 
 	implementation("org.xerial:sqlite-jdbc:3.49.1.0")
+	include(implementation("com.zaxxer:HikariCP:6.2.1")!!)
+	include("org.slf4j:slf4j-api:2.0.16")
 	include(implementation("at.favre.lib:bcrypt:0.10.2")!!)
 	include("at.favre.lib:bytes:1.5.0")
 }

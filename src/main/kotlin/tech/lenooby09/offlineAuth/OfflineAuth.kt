@@ -4,6 +4,7 @@ import net.fabricmc.api.ModInitializer
 import net.fabricmc.fabric.api.command.v2.CommandRegistrationCallback
 import net.fabricmc.fabric.api.event.player.*
 import net.fabricmc.fabric.api.message.v1.ServerMessageEvents
+import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents
 import net.fabricmc.fabric.api.networking.v1.ServerPlayConnectionEvents
 import net.fabricmc.loader.api.FabricLoader
 import net.minecraft.server.level.ServerPlayer
@@ -26,19 +27,23 @@ class OfflineAuth : ModInitializer {
 			private set
 
 		var config: OfflineAuthConfig = OfflineAuthConfig()
+			internal set
+
+		var configDir: java.nio.file.Path? = null
 			private set
 	}
 
 	override fun onInitialize() {
 		LOGGER.info("OfflineAuth initializing...")
 
-		val configDir = FabricLoader.getInstance().configDir.resolve(MOD_ID)
-		configDir.toFile().mkdirs()
+		val cfgDir = FabricLoader.getInstance().configDir.resolve(MOD_ID)
+		cfgDir.toFile().mkdirs()
+		configDir = cfgDir
 
-		config = OfflineAuthConfig.load(configDir)
+		config = OfflineAuthConfig.load(cfgDir)
 		LOGGER.info("Config loaded: authTimeout=${config.authTimeoutSeconds}s, softBan=${config.softBanMinutes}min, maxAttempts=${config.maxLoginAttempts}, minPwLen=${config.minPasswordLength}, skyY=${config.skyY}, autoAuthOps=${config.autoAuthOps}, inviteCodeLength=${config.inviteCodeLength}")
 
-		val dbPath = configDir.resolve("offlineauth.db")
+		val dbPath = cfgDir.resolve("offlineauth.db")
 		val database = DatabaseManager(dbPath)
 		val manager = AuthManager(database, config)
 		authManager = manager
@@ -46,9 +51,14 @@ class OfflineAuth : ModInitializer {
 		registerCommands(manager)
 		registerEvents(manager)
 
+		ServerLifecycleEvents.SERVER_STOPPING.register {
+			LOGGER.info("OfflineAuth shutting down...")
+			manager.shutdown()
+		}
+
 		// First boot: generate a one-time admin invite code if no accounts exist
 		if (!database.hasAnyAccounts() && database.getActiveInviteCodes().isEmpty()) {
-			val adminCode = AdminCommands.generateInviteCode(config.inviteCodeLength)
+ 			val adminCode = AdminCommands.generateInviteCode(config.inviteCodeLength)
 			database.saveInviteCode(adminCode, "SYSTEM", System.currentTimeMillis(), 1)
 			LOGGER.info("  No accounts found. A one-time admin invite code has been generated:")
 			LOGGER.info("  One time register code: $adminCode")

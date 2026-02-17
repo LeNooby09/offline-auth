@@ -30,7 +30,7 @@ import java.util.concurrent.Executors
 import java.util.concurrent.ScheduledFuture
 import java.util.concurrent.TimeUnit
 
-class AuthManager(val database: DatabaseManager, val config: OfflineAuthConfig) {
+class AuthManager(val database: DatabaseManager, var config: OfflineAuthConfig) {
 
 	val authStates = ConcurrentHashMap<UUID, AuthState>()
 	val accountMap = ConcurrentHashMap<UUID, AuthAccount>()
@@ -415,5 +415,6 @@ class AuthManager(val database: DatabaseManager, val config: OfflineAuthConfig) 
 
 	fun shutdown() {
 		scheduler.shutdownNow()
+		database.close()
 	}
 }

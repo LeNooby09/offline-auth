@@ -13,8 +13,10 @@ import net.minecraft.commands.Commands.literal
 import net.minecraft.commands.SharedSuggestionProvider
 import net.minecraft.network.chat.Component
 import net.minecraft.server.permissions.Permissions
+import tech.lenooby09.offlineAuth.OfflineAuth
 import tech.lenooby09.offlineAuth.auth.AuthAccount
 import tech.lenooby09.offlineAuth.auth.AuthManager
+import tech.lenooby09.offlineAuth.config.OfflineAuthConfig
 import java.util.*
 
 object AdminCommands {
@@ -84,6 +86,10 @@ object AdminCommands {
 								.suggests(suggestUsernames)
 								.executes { ctx -> deleteUser(ctx, authManager) }
 						)
+				)
+				.then(
+					literal("reload")
+						.executes { ctx -> reloadConfig(ctx, authManager) }
 				)
 		)
 	}
@@ -195,6 +201,28 @@ object AdminCommands {
 			ctx.source.sendFailure(Component.literal("§cUser not found: $username"))
 		}
 		return if (success) 1 else 0
+	}
+
+	private fun reloadConfig(ctx: CommandContext<CommandSourceStack>, authManager: AuthManager): Int {
+		val configDir = OfflineAuth.configDir
+		if (configDir == null) {
+			ctx.source.sendFailure(Component.literal("§cConfig directory not available."))
+			return 0
+		}
+
+		return try {
+			val newConfig = OfflineAuthConfig.load(configDir)
+			authManager.config = newConfig
+			OfflineAuth.config = newConfig
+			ctx.source.sendSuccess(
+				{ Component.literal("§aConfig reloaded successfully.") },
+				true
+			)
+			1
+		} catch (e: Exception) {
+			ctx.source.sendFailure(Component.literal("§cFailed to reload config: ${e.message}"))
+			0
+		}
 	}
 
 	private fun revokeCode(ctx: CommandContext<CommandSourceStack>, authManager: AuthManager): Int {

@@ -84,7 +84,7 @@ data class OfflineAuthConfig(
 
 		val builder = StringBuilder()
 		builder.appendLine("# OfflineAuth Configuration")
-		builder.appendLine("# Changes to this file require a server restart to take effect.")
+		builder.appendLine("# Changes can be hot-reloaded with /offlineauth reload")
 		builder.appendLine()
 
 		for ((key, value) in entries) {
