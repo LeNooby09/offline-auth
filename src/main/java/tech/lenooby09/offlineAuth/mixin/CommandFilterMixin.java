@@ -1,4 +1,4 @@
-package tech.lenooby09.crackAuth.mixin;
+package tech.lenooby09.offlineAuth.mixin;
 
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.LastSeenMessages;
@@ -10,7 +10,7 @@ import org.spongepowered.asm.mixin.Shadow;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
-import tech.lenooby09.crackAuth.CrackAuth;
+import tech.lenooby09.offlineAuth.OfflineAuth;
 
 @Mixin(ServerGamePacketListenerImpl.class)
 public abstract class CommandFilterMixin {
@@ -29,10 +29,10 @@ public abstract class CommandFilterMixin {
     }
 
     private void filterCommand(String command, CallbackInfo ci) {
-        if (CrackAuth.Companion.getAuthManager() == null) return;
+        if (OfflineAuth.Companion.getAuthManager() == null) return;
 
         ServerPlayer player = getPlayer();
-        if (CrackAuth.Companion.getAuthManager().isAuthenticated(player)) return;
+        if (OfflineAuth.Companion.getAuthManager().isAuthenticated(player)) return;
 
         String cmd = command.toLowerCase().split(" ")[0];
         if (cmd.equals("register") || cmd.equals("login") || cmd.equals("login_as")) {

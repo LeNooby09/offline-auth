@@ -1,4 +1,4 @@
-package tech.lenooby09.crackAuth.auth
+package tech.lenooby09.offlineAuth.auth
 
 import com.mojang.authlib.GameProfile
 import net.minecraft.nbt.CompoundTag
@@ -16,10 +16,10 @@ import net.minecraft.util.ProblemReporter
 import net.minecraft.world.ItemStackWithSlot
 import net.minecraft.world.level.storage.TagValueInput
 import net.minecraft.world.level.storage.TagValueOutput
-import tech.lenooby09.crackAuth.CrackAuth
-import tech.lenooby09.crackAuth.config.CrackAuthConfig
-import tech.lenooby09.crackAuth.mixin.GameProfileAccessor
-import tech.lenooby09.crackAuth.storage.DatabaseManager
+import tech.lenooby09.offlineAuth.OfflineAuth
+import tech.lenooby09.offlineAuth.config.OfflineAuthConfig
+import tech.lenooby09.offlineAuth.mixin.GameProfileAccessor
+import tech.lenooby09.offlineAuth.storage.DatabaseManager
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
 import java.io.DataInputStream
@@ -30,7 +30,7 @@ import java.util.concurrent.Executors
 import java.util.concurrent.ScheduledFuture
 import java.util.concurrent.TimeUnit
 
-class AuthManager(val database: DatabaseManager, val config: CrackAuthConfig) {
+class AuthManager(val database: DatabaseManager, val config: OfflineAuthConfig) {
 
 	val authStates = ConcurrentHashMap<UUID, AuthState>()
 	val accountMap = ConcurrentHashMap<UUID, AuthAccount>()
@@ -283,7 +283,7 @@ class AuthManager(val database: DatabaseManager, val config: CrackAuthConfig) {
 
 			database.savePlayerData(account.id, invBytes, ecBytes)
 		} catch (e: Exception) {
-			CrackAuth.LOGGER.error("Failed to save inventory for account ${account.username}", e)
+			OfflineAuth.LOGGER.error("Failed to save inventory for account ${account.username}", e)
 		}
 	}
 
@@ -314,7 +314,7 @@ class AuthManager(val database: DatabaseManager, val config: CrackAuthConfig) {
 			player.containerMenu.broadcastChanges()
 			player.inventoryMenu.broadcastChanges()
 		} catch (e: Exception) {
-			CrackAuth.LOGGER.error("Failed to load inventory for account ${account.username}", e)
+			OfflineAuth.LOGGER.error("Failed to load inventory for account ${account.username}", e)
 		}
 	}
 

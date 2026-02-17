@@ -1,4 +1,4 @@
-package tech.lenooby09.crackAuth.auth
+package tech.lenooby09.offlineAuth.auth
 
 import java.util.*
 

@@ -27,7 +27,7 @@ loom {
 	splitEnvironmentSourceSets()
 
 	mods {
-		register("crack-auth") {
+		register("offline-auth") {
 			sourceSet("main")
 			sourceSet("client")
 		}

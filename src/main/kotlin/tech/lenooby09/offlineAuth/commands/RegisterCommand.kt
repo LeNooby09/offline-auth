@@ -1,4 +1,4 @@
-package tech.lenooby09.crackAuth.commands
+package tech.lenooby09.offlineAuth.commands
 
 import at.favre.lib.crypto.bcrypt.BCrypt
 import com.mojang.brigadier.CommandDispatcher
@@ -9,9 +9,9 @@ import net.minecraft.commands.CommandSourceStack
 import net.minecraft.commands.Commands.argument
 import net.minecraft.commands.Commands.literal
 import net.minecraft.network.chat.Component
-import tech.lenooby09.crackAuth.auth.AuthAccount
-import tech.lenooby09.crackAuth.auth.AuthManager
-import tech.lenooby09.crackAuth.auth.AuthState
+import tech.lenooby09.offlineAuth.auth.AuthAccount
+import tech.lenooby09.offlineAuth.auth.AuthManager
+import tech.lenooby09.offlineAuth.auth.AuthState
 import java.util.*
 
 object RegisterCommand {

@@ -1,4 +1,4 @@
-package tech.lenooby09.crackAuth.mixin;
+package tech.lenooby09.offlineAuth.mixin;
 
 import com.mojang.authlib.GameProfile;
 import net.minecraft.world.entity.player.Player;

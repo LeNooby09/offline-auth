@@ -1,4 +1,4 @@
-package tech.lenooby09.crackAuth.commands
+package tech.lenooby09.offlineAuth.commands
 
 import at.favre.lib.crypto.bcrypt.BCrypt
 import com.mojang.brigadier.CommandDispatcher
@@ -11,8 +11,8 @@ import net.minecraft.commands.Commands.argument
 import net.minecraft.commands.Commands.literal
 import net.minecraft.network.chat.Component
 import net.minecraft.server.permissions.Permissions
-import tech.lenooby09.crackAuth.auth.AuthAccount
-import tech.lenooby09.crackAuth.auth.AuthManager
+import tech.lenooby09.offlineAuth.auth.AuthAccount
+import tech.lenooby09.offlineAuth.auth.AuthManager
 import java.util.*
 
 object AdminCommands {
@@ -29,7 +29,7 @@ object AdminCommands {
 
 	fun register(dispatcher: CommandDispatcher<CommandSourceStack>, authManager: AuthManager) {
 		dispatcher.register(
-			literal("crackauth")
+			literal("offlineauth")
 				.requires { it.permissions().hasPermission(Permissions.COMMANDS_OWNER) }
 				.then(
 					literal("generate")

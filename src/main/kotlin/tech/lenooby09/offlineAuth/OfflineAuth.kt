@@ -1,4 +1,4 @@
-package tech.lenooby09.crackAuth
+package tech.lenooby09.offlineAuth
 
 import net.fabricmc.api.ModInitializer
 import net.fabricmc.fabric.api.command.v2.CommandRegistrationCallback
@@ -9,36 +9,36 @@ import net.fabricmc.loader.api.FabricLoader
 import net.minecraft.server.level.ServerPlayer
 import net.minecraft.world.InteractionResult
 import org.slf4j.LoggerFactory
-import tech.lenooby09.crackAuth.auth.AuthManager
-import tech.lenooby09.crackAuth.commands.AdminCommands
-import tech.lenooby09.crackAuth.commands.LoginCommand
-import tech.lenooby09.crackAuth.commands.RegisterCommand
-import tech.lenooby09.crackAuth.config.CrackAuthConfig
-import tech.lenooby09.crackAuth.storage.DatabaseManager
+import tech.lenooby09.offlineAuth.auth.AuthManager
+import tech.lenooby09.offlineAuth.commands.AdminCommands
+import tech.lenooby09.offlineAuth.commands.LoginCommand
+import tech.lenooby09.offlineAuth.commands.RegisterCommand
+import tech.lenooby09.offlineAuth.config.OfflineAuthConfig
+import tech.lenooby09.offlineAuth.storage.DatabaseManager
 
-class CrackAuth : ModInitializer {
+class OfflineAuth : ModInitializer {
 
 	companion object {
-		const val MOD_ID = "crack-auth"
+		const val MOD_ID = "offline-auth"
 		val LOGGER = LoggerFactory.getLogger(MOD_ID)
 
 		var authManager: AuthManager? = null
 			private set
 
-		var config: CrackAuthConfig = CrackAuthConfig()
+		var config: OfflineAuthConfig = OfflineAuthConfig()
 			private set
 	}
 
 	override fun onInitialize() {
-		LOGGER.info("CrackAuth initializing...")
+		LOGGER.info("OfflineAuth initializing...")
 
 		val configDir = FabricLoader.getInstance().configDir.resolve(MOD_ID)
 		configDir.toFile().mkdirs()
 
-		config = CrackAuthConfig.load(configDir)
+		config = OfflineAuthConfig.load(configDir)
 		LOGGER.info("Config loaded: authTimeout=${config.authTimeoutSeconds}s, softBan=${config.softBanMinutes}min, maxAttempts=${config.maxLoginAttempts}, minPwLen=${config.minPasswordLength}, skyY=${config.skyY}, autoAuthOps=${config.autoAuthOps}, inviteCodeLength=${config.inviteCodeLength}")
 
-		val dbPath = configDir.resolve("crackauth.db")
+		val dbPath = configDir.resolve("offlineauth.db")
 		val database = DatabaseManager(dbPath)
 		val manager = AuthManager(database, config)
 		authManager = manager
@@ -55,7 +55,7 @@ class CrackAuth : ModInitializer {
 			LOGGER.info("  Use: /register $adminCode <username> <password>")
 		}
 
-		LOGGER.info("CrackAuth initialized successfully!")
+		LOGGER.info("OfflineAuth initialized successfully!")
 	}
 
 	private fun registerCommands(manager: AuthManager) {

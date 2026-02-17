@@ -1,8 +1,8 @@
-# CrackAuth
+# OfflineAuth
 
 Server-side authentication mod for Minecraft offline-mode (cracked) servers built on the Fabric mod loader.
 
-CrackAuth requires players to register with an invite code and log in with a password each session. Until authenticated, players are suspended in the sky and blocked from moving, chatting, breaking blocks, using items, or interacting with entities.
+OfflineAuth requires players to register with an invite code and log in with a password each session. Until authenticated, players are suspended in the sky and blocked from moving, chatting, breaking blocks, using items, or interacting with entities.
 
 ## Features
 
@@ -25,8 +25,8 @@ CrackAuth requires players to register with an invite code and log in with a pas
 
 1. Install Fabric Loader and Fabric API on your server.
 2. Install the Fabric Language Kotlin mod.
-3. Drop the CrackAuth jar into the server `mods/` folder.
-4. Start the server. A config file will be generated at `config/crack-auth/config.yml` and a one-time admin invite code will be printed in the server log.
+3. Drop the OfflineAuth jar into the server `mods/` folder.
+4. Start the server. A config file will be generated at `config/offline-auth/config.yml` and a one-time admin invite code will be printed in the server log.
 5. Use the invite code to register the first (admin) account.
 
 ## Commands
@@ -35,15 +35,15 @@ CrackAuth requires players to register with an invite code and log in with a pas
 |---|---|
 | `/register <invite-code> <username> <password>` | Register a new account using an invite code. |
 | `/login <password>` | Log in to an existing account. |
-| `/crackauth invite generate [uses]` | Generate a new invite code (admin). |
-| `/crackauth invite list` | List all active invite codes (admin). |
-| `/crackauth invite revoke <code>` | Revoke an invite code (admin). |
-| `/crackauth accounts` | List all registered accounts (admin). |
-| `/crackauth remove <username>` | Remove a registered account (admin). |
+| `/offlineauth invite generate [uses]` | Generate a new invite code (admin). |
+| `/offlineauth invite list` | List all active invite codes (admin). |
+| `/offlineauth invite revoke <code>` | Revoke an invite code (admin). |
+| `/offlineauth accounts` | List all registered accounts (admin). |
+| `/offlineauth remove <username>` | Remove a registered account (admin). |
 
 ## Configuration
 
-The configuration file is located at `config/crack-auth/config.yml` and is generated on first startup. Changes require a server restart.
+The configuration file is located at `config/offline-auth/config.yml` and is generated on first startup. Changes require a server restart.
 
 | Option | Default | Description |
 |---|---|---|

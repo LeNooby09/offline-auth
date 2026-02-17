@@ -1,6 +1,6 @@
-package tech.lenooby09.crackAuth.storage
+package tech.lenooby09.offlineAuth.storage
 
-import tech.lenooby09.crackAuth.auth.AuthAccount
+import tech.lenooby09.offlineAuth.auth.AuthAccount
 import java.nio.file.Path
 import java.sql.Connection
 import java.sql.DriverManager

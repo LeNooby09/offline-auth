@@ -1,8 +1,8 @@
 {
   "schemaVersion": 1,
-  "id": "crack-auth",
+  "id": "offline-auth",
   "version": "${version}",
-  "name": "CrackAuth",
+  "name": "OfflineAuth",
   "description": "Server-side authentication mod with invite codes, password login, and display name override for offline-mode servers.",
   "authors": [],
   "contact": {},
@@ -10,19 +10,19 @@
   "environment": "server",
   "entrypoints": {
     "fabric-datagen": [
-      "tech.lenooby09.crackAuth.client.CrackAuthDataGenerator"
+      "tech.lenooby09.offlineAuth.client.OfflineAuthDataGenerator"
     ],
     "main": [
       {
         "adapter": "kotlin",
-        "value": "tech.lenooby09.crackAuth.CrackAuth"
+        "value": "tech.lenooby09.offlineAuth.OfflineAuth"
       }
     ]
   },
   "mixins": [
-    "crack-auth.mixins.json",
+    "offline-auth.mixins.json",
     {
-      "config": "crack-auth.client.mixins.json",
+      "config": "offline-auth.client.mixins.json",
       "environment": "client"
     }
   ],

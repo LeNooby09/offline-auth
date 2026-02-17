@@ -1,10 +1,10 @@
-package tech.lenooby09.crackAuth.config
+package tech.lenooby09.offlineAuth.config
 
-import tech.lenooby09.crackAuth.CrackAuth
+import tech.lenooby09.offlineAuth.OfflineAuth
 import java.nio.file.Files
 import java.nio.file.Path
 
-data class CrackAuthConfig(
+data class OfflineAuthConfig(
 	val authTimeoutSeconds: Long = 60L,
 	val softBanMinutes: Long = 5L,
 	val maxLoginAttempts: Int = 5,
@@ -28,13 +28,13 @@ data class CrackAuthConfig(
 			"invite-code-length" to "# Length of generated invite codes (number of alphanumeric characters, excluding dashes)",
 		)
 
-		fun load(configDir: Path): CrackAuthConfig {
+		fun load(configDir: Path): OfflineAuthConfig {
 			val file = configDir.resolve(FILE_NAME)
 
 			if (!Files.exists(file)) {
-				val default = CrackAuthConfig()
+				val default = OfflineAuthConfig()
 				default.save(configDir)
-				CrackAuth.LOGGER.info("Generated default config file at $file")
+				OfflineAuth.LOGGER.info("Generated default config file at $file")
 				return default
 			}
 
@@ -52,7 +52,7 @@ data class CrackAuthConfig(
 					values[key] = value
 				}
 
-				CrackAuthConfig(
+				OfflineAuthConfig(
 					authTimeoutSeconds = values["auth-timeout-seconds"]?.toLongOrNull() ?: 60L,
 					softBanMinutes = values["soft-ban-minutes"]?.toLongOrNull() ?: 5L,
 					maxLoginAttempts = values["max-login-attempts"]?.toIntOrNull() ?: 5,
@@ -62,8 +62,8 @@ data class CrackAuthConfig(
 					inviteCodeLength = values["invite-code-length"]?.toIntOrNull()?.coerceAtLeast(4) ?: 10,
 				)
 			} catch (e: Exception) {
-				CrackAuth.LOGGER.error("Failed to load config, using defaults", e)
-				CrackAuthConfig()
+				OfflineAuth.LOGGER.error("Failed to load config, using defaults", e)
+				OfflineAuthConfig()
 			}
 		}
 	}
@@ -83,7 +83,7 @@ data class CrackAuthConfig(
 		)
 
 		val builder = StringBuilder()
-		builder.appendLine("# CrackAuth Configuration")
+		builder.appendLine("# OfflineAuth Configuration")
 		builder.appendLine("# Changes to this file require a server restart to take effect.")
 		builder.appendLine()
 
