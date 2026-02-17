@@ -12,6 +12,8 @@ data class OfflineAuthConfig(
 	val skyY: Double = 30000.0,
 	val autoAuthOps: Boolean = true,
 	val inviteCodeLength: Int = 10,
+	val sessionPersistenceEnabled: Boolean = false,
+	val sessionDurationMinutes: Long = 1440L,
 ) {
 
 	companion object {
@@ -26,6 +28,8 @@ data class OfflineAuthConfig(
 			"sky-y" to "# Y coordinate where unauthenticated players are held in the sky",
 			"auto-auth-ops" to "# Whether server operators (OPs) are automatically authenticated on join",
 			"invite-code-length" to "# Length of generated invite codes (number of alphanumeric characters, excluding dashes)",
+			"session-persistence-enabled" to "# Whether players stay authenticated across reconnects from the same IP",
+			"session-duration-minutes" to "# How long a session persists in minutes (default: 1440 = 24 hours)",
 		)
 
 		fun load(configDir: Path): OfflineAuthConfig {
@@ -60,6 +64,8 @@ data class OfflineAuthConfig(
 					skyY = values["sky-y"]?.toDoubleOrNull() ?: 30000.0,
 					autoAuthOps = values["auto-auth-ops"]?.toBooleanStrictOrNull() ?: true,
 					inviteCodeLength = values["invite-code-length"]?.toIntOrNull()?.coerceAtLeast(4) ?: 10,
+					sessionPersistenceEnabled = values["session-persistence-enabled"]?.toBooleanStrictOrNull() ?: false,
+					sessionDurationMinutes = values["session-duration-minutes"]?.toLongOrNull() ?: 1440L,
 				)
 			} catch (e: Exception) {
 				OfflineAuth.LOGGER.error("Failed to load config, using defaults", e)
@@ -80,6 +86,8 @@ data class OfflineAuthConfig(
 			"sky-y" to skyY.toString(),
 			"auto-auth-ops" to autoAuthOps.toString(),
 			"invite-code-length" to inviteCodeLength.toString(),
+			"session-persistence-enabled" to sessionPersistenceEnabled.toString(),
+			"session-duration-minutes" to sessionDurationMinutes.toString(),
 		)
 
 		val builder = StringBuilder()

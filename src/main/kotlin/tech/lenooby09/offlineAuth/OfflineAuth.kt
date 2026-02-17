@@ -12,6 +12,7 @@ import net.minecraft.world.InteractionResult
 import org.slf4j.LoggerFactory
 import tech.lenooby09.offlineAuth.auth.AuthManager
 import tech.lenooby09.offlineAuth.commands.AdminCommands
+import tech.lenooby09.offlineAuth.commands.ChangePasswordCommand
 import tech.lenooby09.offlineAuth.commands.LoginCommand
 import tech.lenooby09.offlineAuth.commands.RegisterCommand
 import tech.lenooby09.offlineAuth.config.OfflineAuthConfig
@@ -72,6 +73,7 @@ class OfflineAuth : ModInitializer {
 		CommandRegistrationCallback.EVENT.register { dispatcher, _, _ ->
 			RegisterCommand.register(dispatcher, manager)
 			LoginCommand.register(dispatcher, manager)
+			ChangePasswordCommand.register(dispatcher, manager)
 			AdminCommands.register(dispatcher, manager)
 		}
 	}

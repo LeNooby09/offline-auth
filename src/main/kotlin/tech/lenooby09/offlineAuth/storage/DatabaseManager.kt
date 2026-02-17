@@ -102,7 +102,8 @@ class DatabaseManager(dbPath: Path) {
                     minecraft_uuid TEXT PRIMARY KEY,
                     x REAL NOT NULL,
                     y REAL NOT NULL,
-                    z REAL NOT NULL
+                    z REAL NOT NULL,
+                    dimension TEXT NOT NULL DEFAULT 'minecraft:overworld'
                 )
                 """.trimIndent()
 				)
@@ -116,6 +117,19 @@ class DatabaseManager(dbPath: Path) {
                     z REAL NOT NULL,
                     yaw REAL NOT NULL DEFAULT 0,
                     pitch REAL NOT NULL DEFAULT 0,
+                    dimension TEXT NOT NULL DEFAULT 'minecraft:overworld',
+                    FOREIGN KEY (account_id) REFERENCES accounts(id)
+                )
+                """.trimIndent()
+				)
+
+				stmt.executeUpdate(
+					"""
+                CREATE TABLE IF NOT EXISTS auth_sessions (
+                    account_id TEXT NOT NULL,
+                    ip_address TEXT NOT NULL,
+                    expires_at INTEGER NOT NULL,
+                    PRIMARY KEY (account_id, ip_address),
                     FOREIGN KEY (account_id) REFERENCES accounts(id)
                 )
                 """.trimIndent()
@@ -126,23 +140,44 @@ class DatabaseManager(dbPath: Path) {
 
 	private fun migrateSchema() {
 		connection().use { conn ->
-			// Add yaw/pitch columns to account_positions if they don't exist (migration from older schema)
-			val columns = mutableSetOf<String>()
+			// Migrate account_positions
+			val apColumns = mutableSetOf<String>()
 			conn.createStatement().use { stmt ->
 				val rs = stmt.executeQuery("PRAGMA table_info(account_positions)")
 				while (rs.next()) {
-					columns.add(rs.getString("name"))
+					apColumns.add(rs.getString("name"))
 				}
 			}
-			if (columns.isNotEmpty()) {
-				if ("yaw" !in columns) {
+			if (apColumns.isNotEmpty()) {
+				if ("yaw" !in apColumns) {
 					conn.createStatement().use { stmt ->
 						stmt.executeUpdate("ALTER TABLE account_positions ADD COLUMN yaw REAL NOT NULL DEFAULT 0")
 					}
 				}
-				if ("pitch" !in columns) {
+				if ("pitch" !in apColumns) {
 					conn.createStatement().use { stmt ->
 						stmt.executeUpdate("ALTER TABLE account_positions ADD COLUMN pitch REAL NOT NULL DEFAULT 0")
+					}
+				}
+				if ("dimension" !in apColumns) {
+					conn.createStatement().use { stmt ->
+						stmt.executeUpdate("ALTER TABLE account_positions ADD COLUMN dimension TEXT NOT NULL DEFAULT 'minecraft:overworld'")
+					}
+				}
+			}
+
+			// Migrate spawn_positions
+			val spColumns = mutableSetOf<String>()
+			conn.createStatement().use { stmt ->
+				val rs = stmt.executeQuery("PRAGMA table_info(spawn_positions)")
+				while (rs.next()) {
+					spColumns.add(rs.getString("name"))
+				}
+			}
+			if (spColumns.isNotEmpty()) {
+				if ("dimension" !in spColumns) {
+					conn.createStatement().use { stmt ->
+						stmt.executeUpdate("ALTER TABLE spawn_positions ADD COLUMN dimension TEXT NOT NULL DEFAULT 'minecraft:overworld'")
 					}
 				}
 			}
@@ -393,29 +428,35 @@ class DatabaseManager(dbPath: Path) {
 
 	// --- Spawn position operations ---
 
-	fun saveSpawnPosition(minecraftUuid: UUID, x: Double, y: Double, z: Double) {
+	data class SpawnPosition(val x: Double, val y: Double, val z: Double, val dimension: String)
+
+	fun saveSpawnPosition(minecraftUuid: UUID, x: Double, y: Double, z: Double, dimension: String) {
 		connection().use { conn ->
 			conn.prepareStatement(
-				"INSERT OR REPLACE INTO spawn_positions (minecraft_uuid, x, y, z) VALUES (?, ?, ?, ?)"
+				"INSERT OR REPLACE INTO spawn_positions (minecraft_uuid, x, y, z, dimension) VALUES (?, ?, ?, ?, ?)"
 			).use { stmt ->
 				stmt.setString(1, minecraftUuid.toString())
 				stmt.setDouble(2, x)
 				stmt.setDouble(3, y)
 				stmt.setDouble(4, z)
+				stmt.setString(5, dimension)
 				stmt.executeUpdate()
 			}
 		}
 	}
 
-	fun loadSpawnPosition(minecraftUuid: UUID): Triple<Double, Double, Double>? {
+	fun loadSpawnPosition(minecraftUuid: UUID): SpawnPosition? {
 		connection().use { conn ->
 			conn.prepareStatement(
-				"SELECT x, y, z FROM spawn_positions WHERE minecraft_uuid = ?"
+				"SELECT x, y, z, dimension FROM spawn_positions WHERE minecraft_uuid = ?"
 			).use { stmt ->
 				stmt.setString(1, minecraftUuid.toString())
 				val rs = stmt.executeQuery()
 				if (rs.next()) {
-					return Triple(rs.getDouble("x"), rs.getDouble("y"), rs.getDouble("z"))
+					return SpawnPosition(
+						rs.getDouble("x"), rs.getDouble("y"), rs.getDouble("z"),
+						rs.getString("dimension")
+					)
 				}
 			}
 		}
@@ -435,10 +476,10 @@ class DatabaseManager(dbPath: Path) {
 
 	// --- Account position operations ---
 
-	fun saveAccountPosition(accountId: UUID, x: Double, y: Double, z: Double, yaw: Float, pitch: Float) {
+	fun saveAccountPosition(accountId: UUID, x: Double, y: Double, z: Double, yaw: Float, pitch: Float, dimension: String) {
 		connection().use { conn ->
 			conn.prepareStatement(
-				"INSERT OR REPLACE INTO account_positions (account_id, x, y, z, yaw, pitch) VALUES (?, ?, ?, ?, ?, ?)"
+				"INSERT OR REPLACE INTO account_positions (account_id, x, y, z, yaw, pitch, dimension) VALUES (?, ?, ?, ?, ?, ?, ?)"
 			).use { stmt ->
 				stmt.setString(1, accountId.toString())
 				stmt.setDouble(2, x)
@@ -446,24 +487,26 @@ class DatabaseManager(dbPath: Path) {
 				stmt.setDouble(4, z)
 				stmt.setFloat(5, yaw)
 				stmt.setFloat(6, pitch)
+				stmt.setString(7, dimension)
 				stmt.executeUpdate()
 			}
 		}
 	}
 
-	data class AccountPosition(val x: Double, val y: Double, val z: Double, val yaw: Float, val pitch: Float)
+	data class AccountPosition(val x: Double, val y: Double, val z: Double, val yaw: Float, val pitch: Float, val dimension: String)
 
 	fun loadAccountPosition(accountId: UUID): AccountPosition? {
 		connection().use { conn ->
 			conn.prepareStatement(
-				"SELECT x, y, z, yaw, pitch FROM account_positions WHERE account_id = ?"
+				"SELECT x, y, z, yaw, pitch, dimension FROM account_positions WHERE account_id = ?"
 			).use { stmt ->
 				stmt.setString(1, accountId.toString())
 				val rs = stmt.executeQuery()
 				if (rs.next()) {
 					return AccountPosition(
 						rs.getDouble("x"), rs.getDouble("y"), rs.getDouble("z"),
-						rs.getFloat("yaw"), rs.getFloat("pitch")
+						rs.getFloat("yaw"), rs.getFloat("pitch"),
+						rs.getString("dimension")
 					)
 				}
 			}
@@ -477,6 +520,73 @@ class DatabaseManager(dbPath: Path) {
 				"DELETE FROM account_positions WHERE account_id = ?"
 			).use { stmt ->
 				stmt.setString(1, accountId.toString())
+				stmt.executeUpdate()
+			}
+		}
+	}
+
+	// --- Session persistence operations ---
+
+	fun saveSession(accountId: UUID, ipAddress: String, expiresAt: Long) {
+		connection().use { conn ->
+			conn.prepareStatement(
+				"INSERT OR REPLACE INTO auth_sessions (account_id, ip_address, expires_at) VALUES (?, ?, ?)"
+			).use { stmt ->
+				stmt.setString(1, accountId.toString())
+				stmt.setString(2, ipAddress)
+				stmt.setLong(3, expiresAt)
+				stmt.executeUpdate()
+			}
+		}
+	}
+
+	fun getValidSession(accountId: UUID, ipAddress: String): Boolean {
+		connection().use { conn ->
+			conn.prepareStatement(
+				"SELECT expires_at FROM auth_sessions WHERE account_id = ? AND ip_address = ?"
+			).use { stmt ->
+				stmt.setString(1, accountId.toString())
+				stmt.setString(2, ipAddress)
+				val rs = stmt.executeQuery()
+				if (rs.next()) {
+					return rs.getLong("expires_at") > System.currentTimeMillis()
+				}
+			}
+		}
+		return false
+	}
+
+	fun deleteSession(accountId: UUID) {
+		connection().use { conn ->
+			conn.prepareStatement(
+				"DELETE FROM auth_sessions WHERE account_id = ?"
+			).use { stmt ->
+				stmt.setString(1, accountId.toString())
+				stmt.executeUpdate()
+			}
+		}
+	}
+
+	fun cleanExpiredSessions() {
+		connection().use { conn ->
+			conn.prepareStatement(
+				"DELETE FROM auth_sessions WHERE expires_at < ?"
+			).use { stmt ->
+				stmt.setLong(1, System.currentTimeMillis())
+				stmt.executeUpdate()
+			}
+		}
+	}
+
+	// --- Password operations ---
+
+	fun updatePasswordHash(accountId: UUID, newPasswordHash: String) {
+		connection().use { conn ->
+			conn.prepareStatement(
+				"UPDATE accounts SET password_hash = ? WHERE id = ?"
+			).use { stmt ->
+				stmt.setString(1, newPasswordHash)
+				stmt.setString(2, accountId.toString())
 				stmt.executeUpdate()
 			}
 		}

@@ -24,6 +24,9 @@ import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
 import java.io.DataInputStream
 import java.io.DataOutputStream
+import net.minecraft.core.registries.Registries
+import net.minecraft.resources.ResourceKey
+import net.minecraft.resources.Identifier
 import java.util.*
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Executors
@@ -47,7 +50,8 @@ class AuthManager(val database: DatabaseManager, var config: OfflineAuthConfig) 
 
 	private var server: MinecraftServer? = null
 
-	private val spawnPositions = ConcurrentHashMap<UUID, Triple<Double, Double, Double>>()
+	data class SpawnPos(val x: Double, val y: Double, val z: Double, val dimension: String)
+	private val spawnPositions = ConcurrentHashMap<UUID, SpawnPos>()
 
 
 	fun isAuthenticated(player: ServerPlayer): Boolean {
@@ -84,13 +88,51 @@ class AuthManager(val database: DatabaseManager, var config: OfflineAuthConfig) 
 
 		authStates[player.uuid] = AuthState.UNAUTHENTICATED
 
+		// Check for session persistence — auto-authenticate if valid session exists
+		val linkedAccount = database.getAccountByMinecraftUUID(player.uuid)
+		if (config.sessionPersistenceEnabled && linkedAccount != null) {
+			val ip = extractAddress(player)
+			OfflineAuth.LOGGER.info("Session persistence check for ${player.gameProfile.name}: ip=$ip, account=${linkedAccount.username}")
+			if (ip != null && database.getValidSession(linkedAccount.id, ip)) {
+				// Valid session found — auto-authenticate
+				authStates[player.uuid] = AuthState.AUTHENTICATED
+				kickExistingSession(account = linkedAccount, newPlayerUuid = player.uuid)
+				accountMap[player.uuid] = linkedAccount
+				activeAccountSessions[linkedAccount.id] = player.uuid
+				database.linkMinecraftAccount(player.uuid, linkedAccount.id)
+				player.customName = Component.literal(linkedAccount.username)
+				player.isCustomNameVisible = true
+				updateGameProfileName(player, linkedAccount.username)
+				loadPlayerInventory(player, linkedAccount)
+				val accountPos = database.loadAccountPosition(linkedAccount.id)
+				if (accountPos != null) {
+					val level = resolveDimension(accountPos.dimension)
+					if (level != null) {
+						player.teleportTo(level, accountPos.x, accountPos.y, accountPos.z, emptySet(), accountPos.yaw, accountPos.pitch, false)
+					}
+				}
+				// Refresh session expiry
+				val expiresAt = System.currentTimeMillis() + (config.sessionDurationMinutes * 60 * 1000)
+				database.saveSession(linkedAccount.id, ip, expiresAt)
+				player.sendSystemMessage(Component.empty())
+				player.sendSystemMessage(Component.literal("§aSession restored. Welcome back, §e${linkedAccount.username}§a!"))
+				player.sendSystemMessage(Component.empty())
+				return
+			}
+		}
+
 		// Save original position and make player invisible/invulnerable in the sky
 		// Check if there's a persisted spawn position from a previous unauthenticated disconnect
 		val savedPos = database.loadSpawnPosition(player.uuid)
-		val originalPos = savedPos ?: Triple(player.x, player.y, player.z)
+		val dimension = player.level().dimension().identifier().toString()
+		val originalPos = if (savedPos != null) {
+			SpawnPos(savedPos.x, savedPos.y, savedPos.z, savedPos.dimension)
+		} else {
+			SpawnPos(player.x, player.y, player.z, dimension)
+		}
 		spawnPositions[player.uuid] = originalPos
 		if (savedPos == null) {
-			database.saveSpawnPosition(player.uuid, player.x, player.y, player.z)
+			database.saveSpawnPosition(player.uuid, player.x, player.y, player.z, dimension)
 		}
 		player.setInvisible(true)
 		player.setInvulnerable(true)
@@ -130,7 +172,12 @@ class AuthManager(val database: DatabaseManager, var config: OfflineAuthConfig) 
 			player.setInvulnerable(false)
 			val pos = spawnPositions[player.uuid]
 			if (pos != null) {
-				player.teleportTo(pos.first, pos.second, pos.third)
+				val level = resolveDimension(pos.dimension)
+				if (level != null) {
+					player.teleportTo(level, pos.x, pos.y, pos.z, emptySet(), player.yRot, player.xRot, false)
+				} else {
+					player.teleportTo(pos.x, pos.y, pos.z)
+				}
 			}
 			// Keep the spawn position in the database for the next login
 		} else {
@@ -202,15 +249,29 @@ class AuthManager(val database: DatabaseManager, var config: OfflineAuthConfig) 
 		player.setInvisible(false)
 		val accountPos = database.loadAccountPosition(account.id)
 		if (accountPos != null) {
-			player.teleportTo(
-				player.level() as net.minecraft.server.level.ServerLevel,
-				accountPos.x, accountPos.y, accountPos.z,
-				emptySet(), accountPos.yaw, accountPos.pitch, false
-			)
+			val level = resolveDimension(accountPos.dimension)
+			if (level != null) {
+				player.teleportTo(
+					level,
+					accountPos.x, accountPos.y, accountPos.z,
+					emptySet(), accountPos.yaw, accountPos.pitch, false
+				)
+			} else {
+				player.teleportTo(
+					player.level() as net.minecraft.server.level.ServerLevel,
+					accountPos.x, accountPos.y, accountPos.z,
+					emptySet(), accountPos.yaw, accountPos.pitch, false
+				)
+			}
 		} else {
 			val pos = spawnPositions.remove(player.uuid)
 			if (pos != null) {
-				player.teleportTo(pos.first, pos.second, pos.third)
+				val level = resolveDimension(pos.dimension)
+				if (level != null) {
+					player.teleportTo(level, pos.x, pos.y, pos.z, emptySet(), player.yRot, player.xRot, false)
+				} else {
+					player.teleportTo(pos.x, pos.y, pos.z)
+				}
 			}
 		}
 		spawnPositions.remove(player.uuid)
@@ -219,6 +280,9 @@ class AuthManager(val database: DatabaseManager, var config: OfflineAuthConfig) 
 		player.deltaMovement = net.minecraft.world.phys.Vec3.ZERO
 		player.resetFallDistance()
 		player.setInvulnerable(false)
+
+		// Store session for "remember me" feature
+		storeSessionForPlayer(player, account)
 	}
 
 	fun freezePlayer(player: ServerPlayer) {
@@ -226,8 +290,8 @@ class AuthManager(val database: DatabaseManager, var config: OfflineAuthConfig) 
 		// Keep unauthenticated players frozen at sky position with zero velocity
 		player.deltaMovement = net.minecraft.world.phys.Vec3.ZERO
 		player.resetFallDistance()
-		if (player.x != pos.first || player.y != config.skyY || player.z != pos.third) {
-			player.teleportTo(pos.first, config.skyY, pos.third)
+		if (player.x != pos.x || player.y != config.skyY || player.z != pos.z) {
+			player.teleportTo(pos.x, config.skyY, pos.z)
 		}
 	}
 
@@ -254,8 +318,10 @@ class AuthManager(val database: DatabaseManager, var config: OfflineAuthConfig) 
 			val connField = player.connection.javaClass.superclass.getDeclaredField("connection")
 			connField.isAccessible = true
 			val connection = connField.get(player.connection) as net.minecraft.network.Connection
-			connection.remoteAddress?.toString()?.substringBefore(":")?.removePrefix("/")
-		} catch (_: Exception) {
+			val address = connection.remoteAddress?.toString()?.substringBefore(":")?.removePrefix("/")
+			address
+		} catch (e: Exception) {
+			OfflineAuth.LOGGER.warn("Failed to extract IP address for player ${player.gameProfile.name}", e)
 			null
 		}
 	}
@@ -300,8 +366,30 @@ class AuthManager(val database: DatabaseManager, var config: OfflineAuthConfig) 
 
 	// --- Inventory serialization ---
 
+	// Save session after successful authentication
+	fun storeSessionForPlayer(player: ServerPlayer, account: AuthAccount) {
+		if (config.sessionPersistenceEnabled) {
+			val ip = extractAddress(player)
+			if (ip != null) {
+				val expiresAt = System.currentTimeMillis() + (config.sessionDurationMinutes * 60 * 1000)
+				database.saveSession(account.id, ip, expiresAt)
+				OfflineAuth.LOGGER.info("Saved session for ${account.username} from IP $ip (expires in ${config.sessionDurationMinutes} min)")
+			} else {
+				OfflineAuth.LOGGER.warn("Could not save session for ${account.username}: failed to extract IP address")
+			}
+		}
+	}
+
+	private fun resolveDimension(dimensionKey: String): net.minecraft.server.level.ServerLevel? {
+		val srv = server ?: return null
+		val id = Identifier.tryParse(dimensionKey) ?: return null
+		val key = ResourceKey.create(Registries.DIMENSION, id)
+		return srv.getLevel(key)
+	}
+
 	private fun saveAccountPosition(player: ServerPlayer, account: AuthAccount) {
-		database.saveAccountPosition(account.id, player.x, player.y, player.z, player.yRot, player.xRot)
+		val dimension = player.level().dimension().identifier().toString()
+		database.saveAccountPosition(account.id, player.x, player.y, player.z, player.yRot, player.xRot, dimension)
 	}
 
 	private fun savePlayerInventory(player: ServerPlayer, account: AuthAccount) {
