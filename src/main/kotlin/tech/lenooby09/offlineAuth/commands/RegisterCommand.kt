@@ -17,18 +17,21 @@ import java.util.*
 object RegisterCommand {
 
 	fun register(dispatcher: CommandDispatcher<CommandSourceStack>, authManager: AuthManager) {
+ 	val registerNode = literal("register")
+			.then(
+				argument("invite_code", string())
+					.then(
+						argument("username", string())
+							.then(
+								argument("password", string())
+									.executes { ctx -> execute(ctx, authManager) }
+							)
+					)
+			)
+
+		dispatcher.register(registerNode)
 		dispatcher.register(
-			literal("register")
-				.then(
-					argument("invite_code", string())
-						.then(
-							argument("username", string())
-								.then(
-									argument("password", string())
-										.executes { ctx -> execute(ctx, authManager) }
-								)
-						)
-				)
+			literal("r").redirect(dispatcher.root.getChild("register"))
 		)
 	}
 

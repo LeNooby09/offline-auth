@@ -28,6 +28,9 @@ object LoginCommand {
 						)
 				)
 		)
+		dispatcher.register(
+			literal("l").redirect(dispatcher.root.getChild("login"))
+		)
 
 		// /login_as <username> <password> — for logging in from a new MC account
 		dispatcher.register(
@@ -39,6 +42,9 @@ object LoginCommand {
 								.executes { ctx -> executeWithUsername(ctx, authManager) }
 						)
 				)
+		)
+		dispatcher.register(
+			literal("ls").redirect(dispatcher.root.getChild("login_as"))
 		)
 	}
 

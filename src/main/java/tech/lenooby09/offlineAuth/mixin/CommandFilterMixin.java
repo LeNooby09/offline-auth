@@ -35,7 +35,7 @@ public abstract class CommandFilterMixin {
         if (OfflineAuth.Companion.getAuthManager().isAuthenticated(player)) return;
 
         String cmd = command.toLowerCase().split(" ")[0];
-        if (cmd.equals("register") || cmd.equals("login") || cmd.equals("login_as")) {
+        if (cmd.equals("register") || cmd.equals("r") || cmd.equals("login") || cmd.equals("l") || cmd.equals("login_as") || cmd.equals("ls")) {
             return;
         }
 
