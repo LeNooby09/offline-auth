@@ -1,5 +1,6 @@
 package tech.lenooby09.crackAuth.commands
 
+import at.favre.lib.crypto.bcrypt.BCrypt
 import com.mojang.brigadier.CommandDispatcher
 import com.mojang.brigadier.arguments.IntegerArgumentType
 import com.mojang.brigadier.arguments.StringArgumentType.getString
@@ -10,7 +11,9 @@ import net.minecraft.commands.Commands.argument
 import net.minecraft.commands.Commands.literal
 import net.minecraft.network.chat.Component
 import net.minecraft.server.permissions.Permissions
+import tech.lenooby09.crackAuth.auth.AuthAccount
 import tech.lenooby09.crackAuth.auth.AuthManager
+import java.util.*
 
 object AdminCommands {
 
@@ -48,6 +51,23 @@ object AdminCommands {
 						.then(
 							argument("code", string())
 								.executes { ctx -> revokeCode(ctx, authManager) }
+						)
+				)
+				.then(
+					literal("createuser")
+						.then(
+							argument("username", string())
+								.then(
+									argument("password", string())
+										.executes { ctx -> createUser(ctx, authManager) }
+								)
+						)
+				)
+				.then(
+					literal("deleteuser")
+						.then(
+							argument("username", string())
+								.executes { ctx -> deleteUser(ctx, authManager) }
 						)
 				)
 		)
@@ -96,6 +116,70 @@ object AdminCommands {
 			)
 		}
 		return 1
+	}
+
+	private fun createUser(
+		ctx: CommandContext<CommandSourceStack>,
+		authManager: AuthManager
+	): Int {
+		val username = getString(ctx, "username")
+		val password = getString(ctx, "password")
+
+		if (username.length < 3 || username.length > 16) {
+			ctx.source.sendFailure(Component.literal("§cUsername must be between 3 and 16 characters."))
+			return 0
+		}
+
+		if (!username.matches(Regex("^[a-zA-Z0-9_]+$"))) {
+			ctx.source.sendFailure(Component.literal("§cUsername can only contain letters, numbers, and underscores."))
+			return 0
+		}
+
+		if (password.length < authManager.config.minPasswordLength) {
+			ctx.source.sendFailure(Component.literal("§cPassword must be at least ${authManager.config.minPasswordLength} characters."))
+			return 0
+		}
+
+		if (authManager.database.getAccountByUsername(username) != null) {
+			ctx.source.sendFailure(Component.literal("§cUsername already taken."))
+			return 0
+		}
+
+		val account = AuthAccount(
+			id = UUID.randomUUID(),
+			username = username,
+			passwordHash = BCrypt.withDefaults().hashToString(12, password.toCharArray()),
+			registeredAt = System.currentTimeMillis(),
+		)
+
+		try {
+			authManager.database.saveAccount(account)
+		} catch (e: Exception) {
+			ctx.source.sendFailure(Component.literal("§cFailed to create user. Please try again."))
+			return 0
+		}
+
+		ctx.source.sendSuccess(
+			{ Component.literal("§aCreated user: §e$username") },
+			false
+		)
+		return 1
+	}
+
+	private fun deleteUser(ctx: CommandContext<CommandSourceStack>, authManager: AuthManager): Int {
+		val username = getString(ctx, "username")
+
+		val success = authManager.database.deleteAccountByUsername(username)
+
+		if (success) {
+			ctx.source.sendSuccess(
+				{ Component.literal("§aDeleted user: §e$username") },
+				false
+			)
+		} else {
+			ctx.source.sendFailure(Component.literal("§cUser not found: $username"))
+		}
+		return if (success) 1 else 0
 	}
 
 	private fun revokeCode(ctx: CommandContext<CommandSourceStack>, authManager: AuthManager): Int {

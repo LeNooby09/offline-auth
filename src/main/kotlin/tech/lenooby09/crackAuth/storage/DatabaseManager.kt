@@ -248,6 +248,25 @@ class DatabaseManager(dbPath: Path) {
 		return null
 	}
 
+	fun deleteAccountByUsername(username: String): Boolean {
+		val account = getAccountByUsername(username) ?: return false
+		val accountId = account.id.toString()
+
+		connection.prepareStatement("DELETE FROM player_data WHERE account_id = ?").use { stmt ->
+			stmt.setString(1, accountId)
+			stmt.executeUpdate()
+		}
+		connection.prepareStatement("DELETE FROM account_links WHERE account_id = ?").use { stmt ->
+			stmt.setString(1, accountId)
+			stmt.executeUpdate()
+		}
+		connection.prepareStatement("DELETE FROM accounts WHERE id = ?").use { stmt ->
+			stmt.setString(1, accountId)
+			stmt.executeUpdate()
+		}
+		return true
+	}
+
 	fun hasAnyAccounts(): Boolean {
 		connection.createStatement().use { stmt ->
 			val rs = stmt.executeQuery("SELECT COUNT(*) FROM accounts")
