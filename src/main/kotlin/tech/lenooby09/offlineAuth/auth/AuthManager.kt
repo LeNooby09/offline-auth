@@ -213,6 +213,12 @@ class AuthManager(val database: DatabaseManager, var config: OfflineAuthConfig) 
 			saveAccountPosition(player, account)
 			savePlayerInventory(player, account)
 			activeAccountSessions.remove(account.id, player.uuid)
+
+			// De-op the MC player on disconnect so OP stays with the account, not the UUID
+			val srv = server
+			if (srv != null && srv.playerList.isOp(NameAndId(player.gameProfile))) {
+				srv.playerList.deop(NameAndId(player.gameProfile))
+			}
 		}
 
 		// Restore player state before disconnect so playerdata isn't saved in the sky
@@ -271,7 +277,34 @@ class AuthManager(val database: DatabaseManager, var config: OfflineAuthConfig) 
 			saveAccountPosition(player, oldAccount)
 			savePlayerInventory(player, oldAccount)
 			activeAccountSessions.remove(oldAccount.id, player.uuid)
+
+			// De-op so the old account's OP doesn't leak to the new account
+			val srv = server
+			if (srv != null && srv.playerList.isOp(NameAndId(player.gameProfile))) {
+				srv.playerList.deop(NameAndId(player.gameProfile))
+			}
 		}
+	}
+
+	/**
+	 * Applies or removes OP status for an account's currently online player (if any).
+	 */
+	fun applyOpToOnlinePlayer(account: AuthAccount, op: Boolean) {
+		val srv = server ?: return
+		val playerUuid = activeAccountSessions[account.id] ?: return
+		val player = srv.playerList.getPlayer(playerUuid) ?: return
+		val currentlyOp = srv.playerList.isOp(NameAndId(player.gameProfile))
+		if (op && !currentlyOp) {
+			srv.playerList.op(NameAndId(player.gameProfile))
+		} else if (!op && currentlyOp) {
+			srv.playerList.deop(NameAndId(player.gameProfile))
+		}
+		player.connection.send(
+			net.minecraft.network.protocol.game.ClientboundEntityEventPacket(
+				player,
+				if (op) 28.toByte() else 24.toByte()
+			)
+		)
 	}
 
 	fun onAuthenticated(player: ServerPlayer, account: AuthAccount) {
@@ -584,13 +617,19 @@ class AuthManager(val database: DatabaseManager, var config: OfflineAuthConfig) 
 			// Save stats and serialize
 			val statsBytes = serializeStats(player)
 
+			// Save OP status
+			val srv = server
+			val isOp = srv != null && srv.playerList.isOp(NameAndId(player.gameProfile))
+			val opLevel = if (isOp) 4 else 0
+
 			// Offload the DB write after serialization is done on the main thread
 			runAsyncFire {
 				database.savePlayerData(
 					account.id, invBytes, ecBytes, eqBytes, exp, expLevel, expProgress,
 					health, foodLevel, saturation, gameMode, selectedSlot, effectsBytes, isFlying,
 					respawnBytes, recipesBytes, advancementsBytes, statsBytes,
-					foodExhaustion, foodTickTimer, score, fireTicks, airSupply
+					foodExhaustion, foodTickTimer, score, fireTicks, airSupply,
+					isOp, opLevel
 				)
 			}
 		} catch (e: Exception) {
@@ -687,6 +726,23 @@ class AuthManager(val database: DatabaseManager, var config: OfflineAuthConfig) 
 			// Restore fire ticks and air supply
 			player.remainingFireTicks = data.fireTicks
 			player.airSupply = data.airSupply
+
+			// Restore OP status
+			val srv = server
+			if (srv != null) {
+				val currentlyOp = srv.playerList.isOp(NameAndId(player.gameProfile))
+				if (data.isOp && !currentlyOp) {
+					srv.playerList.op(NameAndId(player.gameProfile))
+				} else if (!data.isOp && currentlyOp) {
+					srv.playerList.deop(NameAndId(player.gameProfile))
+				}
+				player.connection.send(
+					net.minecraft.network.protocol.game.ClientboundEntityEventPacket(
+						player,
+						if (data.isOp) 28.toByte() else 24.toByte()
+					)
+				)
+			}
 
 			// Sync to client
 			player.containerMenu.broadcastChanges()

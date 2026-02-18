@@ -111,6 +111,8 @@ class DatabaseManager(dbPath: Path) {
                     score INTEGER NOT NULL DEFAULT 0,
                     fire_ticks INTEGER NOT NULL DEFAULT 0,
                     air_supply INTEGER NOT NULL DEFAULT 300,
+                    is_op INTEGER NOT NULL DEFAULT 0,
+                    op_level INTEGER NOT NULL DEFAULT 0,
                     updated_at INTEGER NOT NULL,
                     FOREIGN KEY (account_id) REFERENCES accounts(id)
                 )
@@ -362,6 +364,16 @@ class DatabaseManager(dbPath: Path) {
 				stmt.executeUpdate("ALTER TABLE player_data ADD COLUMN air_supply INTEGER NOT NULL DEFAULT 300")
 			}
 		}
+		if (pdColumns.isNotEmpty() && "is_op" !in pdColumns) {
+			conn.createStatement().use { stmt ->
+				stmt.executeUpdate("ALTER TABLE player_data ADD COLUMN is_op INTEGER NOT NULL DEFAULT 0")
+			}
+		}
+		if (pdColumns.isNotEmpty() && "op_level" !in pdColumns) {
+			conn.createStatement().use { stmt ->
+				stmt.executeUpdate("ALTER TABLE player_data ADD COLUMN op_level INTEGER NOT NULL DEFAULT 0")
+			}
+		}
 	}
 
 	// --- Account operations ---
@@ -563,10 +575,12 @@ class DatabaseManager(dbPath: Path) {
 		score: Int,
 		fireTicks: Int,
 		airSupply: Int,
+		isOp: Boolean,
+		opLevel: Int,
 	) {
 		connection().use { conn ->
 			conn.prepareStatement(
-				"INSERT OR REPLACE INTO player_data (account_id, inventory_data, ender_chest_data, equipment_data, exp, exp_level, exp_progress, health, food_level, saturation, game_mode, selected_slot, effects_data, is_flying, respawn_data, recipes_data, advancements_data, stats_data, food_exhaustion, food_tick_timer, score, fire_ticks, air_supply, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+				"INSERT OR REPLACE INTO player_data (account_id, inventory_data, ender_chest_data, equipment_data, exp, exp_level, exp_progress, health, food_level, saturation, game_mode, selected_slot, effects_data, is_flying, respawn_data, recipes_data, advancements_data, stats_data, food_exhaustion, food_tick_timer, score, fire_ticks, air_supply, is_op, op_level, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
 			).use { stmt ->
 				stmt.setString(1, accountId.toString())
 				stmt.setBytes(2, inventoryData)
@@ -591,7 +605,9 @@ class DatabaseManager(dbPath: Path) {
 				stmt.setInt(21, score)
 				stmt.setInt(22, fireTicks)
 				stmt.setInt(23, airSupply)
-				stmt.setLong(24, System.currentTimeMillis())
+				stmt.setInt(24, if (isOp) 1 else 0)
+				stmt.setInt(25, opLevel)
+				stmt.setLong(26, System.currentTimeMillis())
 				stmt.executeUpdate()
 			}
 		}
@@ -620,12 +636,14 @@ class DatabaseManager(dbPath: Path) {
 		val score: Int,
 		val fireTicks: Int,
 		val airSupply: Int,
+		val isOp: Boolean,
+		val opLevel: Int,
 	)
 
 	fun loadPlayerData(accountId: UUID): PlayerData? {
 		connection().use { conn ->
 			conn.prepareStatement(
-				"SELECT inventory_data, ender_chest_data, equipment_data, exp, exp_level, exp_progress, health, food_level, saturation, game_mode, selected_slot, effects_data, is_flying, respawn_data, recipes_data, advancements_data, stats_data, food_exhaustion, food_tick_timer, score, fire_ticks, air_supply FROM player_data WHERE account_id = ?"
+				"SELECT inventory_data, ender_chest_data, equipment_data, exp, exp_level, exp_progress, health, food_level, saturation, game_mode, selected_slot, effects_data, is_flying, respawn_data, recipes_data, advancements_data, stats_data, food_exhaustion, food_tick_timer, score, fire_ticks, air_supply, is_op, op_level FROM player_data WHERE account_id = ?"
 			).use { stmt ->
 				stmt.setString(1, accountId.toString())
 				val rs = stmt.executeQuery()
@@ -653,6 +671,8 @@ class DatabaseManager(dbPath: Path) {
 						score = rs.getInt("score"),
 						fireTicks = rs.getInt("fire_ticks"),
 						airSupply = rs.getInt("air_supply"),
+						isOp = rs.getInt("is_op") != 0,
+						opLevel = rs.getInt("op_level"),
 					)
 				}
 			}
@@ -692,6 +712,41 @@ class DatabaseManager(dbPath: Path) {
 			}
 		}
 		return names
+	}
+
+	fun setAccountOp(accountId: UUID, isOp: Boolean, opLevel: Int) {
+		connection().use { conn ->
+			// Use upsert: if no player_data row exists yet, create one with OP fields set
+			conn.prepareStatement(
+				"""
+				INSERT INTO player_data (account_id, is_op, op_level, updated_at)
+				VALUES (?, ?, ?, ?)
+				ON CONFLICT(account_id) DO UPDATE SET is_op = ?, op_level = ?, updated_at = ?
+				""".trimIndent()
+			).use { stmt ->
+				val now = System.currentTimeMillis()
+				stmt.setString(1, accountId.toString())
+				stmt.setInt(2, if (isOp) 1 else 0)
+				stmt.setInt(3, opLevel)
+				stmt.setLong(4, now)
+				stmt.setInt(5, if (isOp) 1 else 0)
+				stmt.setInt(6, opLevel)
+				stmt.setLong(7, now)
+				stmt.executeUpdate()
+			}
+		}
+	}
+
+	fun getAccountOp(accountId: UUID): Boolean {
+		connection().use { conn ->
+			conn.prepareStatement(
+				"SELECT is_op FROM player_data WHERE account_id = ?"
+			).use { stmt ->
+				stmt.setString(1, accountId.toString())
+				val rs = stmt.executeQuery()
+				return rs.next() && rs.getInt("is_op") != 0
+			}
+		}
 	}
 
 	fun hasAnyAccounts(): Boolean {

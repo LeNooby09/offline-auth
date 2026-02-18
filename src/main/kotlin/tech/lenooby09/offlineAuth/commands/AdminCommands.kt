@@ -100,9 +100,25 @@ object AdminCommands {
 								)
 						)
 				)
-				.then(
+ 			.then(
 					literal("reload")
 						.executes { ctx -> reloadConfig(ctx, authManager) }
+				)
+				.then(
+					literal("op")
+						.then(
+							argument("username", string())
+								.suggests(suggestUsernames)
+								.executes { ctx -> opAccount(ctx, authManager) }
+						)
+				)
+				.then(
+					literal("deop")
+						.then(
+							argument("username", string())
+								.suggests(suggestUsernames)
+								.executes { ctx -> deopAccount(ctx, authManager) }
+						)
 				)
 		)
 	}
@@ -286,6 +302,38 @@ object AdminCommands {
 			}
 		})
 
+		return 1
+	}
+
+	private fun opAccount(ctx: CommandContext<CommandSourceStack>, authManager: AuthManager): Int {
+		val username = getString(ctx, "username")
+		val account = authManager.database.getAccountByUsername(username)
+		if (account == null) {
+			ctx.source.sendFailure(Component.literal("§cAccount '$username' not found."))
+			return 0
+		}
+		authManager.database.setAccountOp(account.id, isOp = true, opLevel = 4)
+		authManager.applyOpToOnlinePlayer(account, op = true)
+		ctx.source.sendSuccess(
+			{ Component.literal("§aAccount '${account.username}' is now OP.") },
+			true
+		)
+		return 1
+	}
+
+	private fun deopAccount(ctx: CommandContext<CommandSourceStack>, authManager: AuthManager): Int {
+		val username = getString(ctx, "username")
+		val account = authManager.database.getAccountByUsername(username)
+		if (account == null) {
+			ctx.source.sendFailure(Component.literal("§cAccount '$username' not found."))
+			return 0
+		}
+		authManager.database.setAccountOp(account.id, isOp = false, opLevel = 0)
+		authManager.applyOpToOnlinePlayer(account, op = false)
+		ctx.source.sendSuccess(
+			{ Component.literal("§eAccount '${account.username}' is no longer OP.") },
+			true
+		)
 		return 1
 	}
 

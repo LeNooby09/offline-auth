@@ -95,10 +95,14 @@ object RegisterCommand {
 				isDashboardAdmin = grantAdmin,
 			)
 
-			try {
+ 		try {
 				authManager.database.saveAccount(account)
 				authManager.database.useInviteCode(inviteCode, username)
 				authManager.recordRegistrationIp(player, account.id)
+				// Auto-OP the very first account
+				if (grantAdmin) {
+					authManager.database.setAccountOp(account.id, isOp = true, opLevel = 4)
+				}
 			} catch (e: Exception) {
 				return@runAsync "§cRegistration failed. Please try again." to null
 			}
