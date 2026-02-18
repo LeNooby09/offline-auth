@@ -56,6 +56,16 @@ object LoginCommand {
 		val password = getString(ctx, "password")
 		val alreadyAuthenticated = authManager.authStates[player.uuid] == AuthState.AUTHENTICATED
 
+		// Block re-login to the same account
+		if (alreadyAuthenticated) {
+			val currentAccount = authManager.accountMap[player.uuid]
+			if (currentAccount != null) {
+				// /login always uses the linked account, which is the current one
+				player.sendSystemMessage(Component.literal("§cYou are already logged into this account."))
+				return 0
+			}
+		}
+
 		player.sendSystemMessage(Component.literal("§7Authenticating..."))
 
 		// Offload DB lookup + BCrypt verify to the IO executor
@@ -98,6 +108,15 @@ object LoginCommand {
 		val username = getString(ctx, "username")
 		val password = getString(ctx, "password")
 		val alreadyAuthenticated = authManager.authStates[player.uuid] == AuthState.AUTHENTICATED
+
+		// Block re-login to the same account
+		if (alreadyAuthenticated) {
+			val currentAccount = authManager.accountMap[player.uuid]
+			if (currentAccount != null && currentAccount.username.equals(username, ignoreCase = true)) {
+				player.sendSystemMessage(Component.literal("§cYou are already logged into this account."))
+				return 0
+			}
+		}
 
 		player.sendSystemMessage(Component.literal("§7Authenticating..."))
 

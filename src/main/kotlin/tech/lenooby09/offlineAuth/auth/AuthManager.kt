@@ -23,6 +23,10 @@ import tech.lenooby09.offlineAuth.OfflineAuth
 import tech.lenooby09.offlineAuth.config.OfflineAuthConfig
 import tech.lenooby09.offlineAuth.mixin.EquipmentAccessor
 import tech.lenooby09.offlineAuth.mixin.GameProfileAccessor
+import tech.lenooby09.offlineAuth.mixin.MinecraftServerAccessor
+import tech.lenooby09.offlineAuth.mixin.RecipeBookAccessor
+import tech.lenooby09.offlineAuth.mixin.ServerStatsCounterInvoker
+import tech.lenooby09.offlineAuth.mixin.StatsCounterAccessor
 import tech.lenooby09.offlineAuth.storage.DatabaseManager
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
@@ -31,6 +35,8 @@ import java.io.DataOutputStream
 import net.minecraft.core.registries.Registries
 import net.minecraft.resources.ResourceKey
 import net.minecraft.resources.Identifier
+import net.minecraft.world.level.storage.LevelResource
+import java.nio.file.Files
 import java.util.*
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.ExecutorService
@@ -503,9 +509,46 @@ class AuthManager(val database: DatabaseManager, var config: OfflineAuthConfig) 
 
 			// Save experience
 			val exp = player.totalExperience
+			val expLevel = player.experienceLevel
+			val expProgress = player.experienceProgress
+
+			// Save health, hunger, saturation
+			val health = player.health
+			val foodLevel = player.foodData.foodLevel
+			val saturation = player.foodData.saturationLevel
+
+			// Save game mode
+			val gameMode = player.gameMode.gameModeForPlayer.name
+
+			// Save selected hotbar slot
+			val selectedSlot = player.inventory.getSelectedSlot()
+
+			// Serialize active potion effects
+			val effectsBytes = serializeEffects(player)
+
+			// Save flying state
+			val isFlying = player.abilities.flying
+
+			// Serialize respawn point
+			val respawnBytes = serializeRespawnConfig(player)
+
+			// Serialize recipe book
+			val recipesBytes = serializeRecipeBook(player)
+
+			// Save advancements to file and read the content
+			val advancementsBytes = serializeAdvancements(player)
+
+			// Save stats and serialize
+			val statsBytes = serializeStats(player)
 
 			// Offload the DB write after serialization is done on the main thread
-			runAsyncFire { database.savePlayerData(account.id, invBytes, ecBytes, eqBytes, exp) }
+			runAsyncFire {
+				database.savePlayerData(
+					account.id, invBytes, ecBytes, eqBytes, exp, expLevel, expProgress,
+					health, foodLevel, saturation, gameMode, selectedSlot, effectsBytes, isFlying,
+					respawnBytes, recipesBytes, advancementsBytes, statsBytes
+				)
+			}
 		} catch (e: Exception) {
 			OfflineAuth.LOGGER.error("Failed to save inventory for account ${account.username}", e)
 		}
@@ -546,17 +589,84 @@ class AuthManager(val database: DatabaseManager, var config: OfflineAuthConfig) 
 				}
 			}
 
-			// Restore experience
-			player.setExperiencePoints(0)
-			player.experienceLevel = 0
-			player.experienceProgress = 0f
-			player.giveExperiencePoints(data.exp)
+			// Restore experience directly by setting level and progress
+			player.experienceLevel = data.expLevel
+			player.experienceProgress = data.expProgress
+			player.totalExperience = data.exp
+
+			// Restore health
+			player.health = data.health
+
+			// Restore hunger and saturation
+			player.foodData.setFoodLevel(data.foodLevel)
+			player.foodData.setSaturation(data.saturation)
+
+			// Restore game mode
+			try {
+				val mode = net.minecraft.world.level.GameType.valueOf(data.gameMode)
+				player.setGameMode(mode)
+			} catch (_: IllegalArgumentException) {
+				// Keep current game mode if saved value is invalid
+			}
+
+			// Restore flying state
+			if (player.abilities.mayfly) {
+				player.abilities.flying = data.isFlying
+				player.onUpdateAbilities()
+			}
+
+			// Restore selected hotbar slot
+			player.inventory.setSelectedSlot(data.selectedSlot.coerceIn(0, 8))
+
+			// Restore potion effects
+			deserializeAndApplyEffects(player, data.effectsData)
+
+			// Restore respawn point
+			deserializeRespawnConfig(player, data.respawnData)
+
+			// Restore recipe book
+			deserializeRecipeBook(player, data.recipesData)
+
+			// Restore advancements
+			deserializeAdvancements(player, data.advancementsData)
+
+			// Restore stats
+			deserializeStats(player, data.statsData)
 
 			// Sync to client
 			player.containerMenu.broadcastChanges()
 			player.inventoryMenu.broadcastChanges()
 		} catch (e: Exception) {
 			OfflineAuth.LOGGER.error("Failed to load inventory for account ${account.username}", e)
+		}
+	}
+
+	private fun serializeEffects(player: ServerPlayer): ByteArray? {
+		val effects = player.activeEffects
+		if (effects.isEmpty()) return null
+		val registryAccess = server!!.registryAccess()
+		val reporter = ProblemReporter.DISCARDING
+		val output = TagValueOutput.createWithContext(reporter, registryAccess)
+		output.store("effects", net.minecraft.world.effect.MobEffectInstance.CODEC.listOf(), effects.toList())
+		return compressTag(output.buildResult())
+	}
+
+	private fun deserializeAndApplyEffects(player: ServerPlayer, effectsData: ByteArray?) {
+		player.removeAllEffects()
+		if (effectsData == null) return
+		try {
+			val registryAccess = server!!.registryAccess()
+			val reporter = ProblemReporter.DISCARDING
+			val tag = decompressTag(effectsData)
+			val input = TagValueInput.create(reporter, registryAccess, tag)
+			val effects = input.read("effects", net.minecraft.world.effect.MobEffectInstance.CODEC.listOf())
+			effects.ifPresent { list ->
+				for (effect in list) {
+					player.addEffect(effect)
+				}
+			}
+		} catch (e: Exception) {
+			OfflineAuth.LOGGER.error("Failed to deserialize potion effects", e)
 		}
 	}
 
@@ -572,6 +682,152 @@ class AuthManager(val database: DatabaseManager, var config: OfflineAuthConfig) 
 		val bais = ByteArrayInputStream(bytes)
 		return DataInputStream(bais).use { dis ->
 			NbtIo.read(dis)
+		}
+	}
+
+	// --- Respawn point serialization ---
+
+	private fun serializeRespawnConfig(player: ServerPlayer): ByteArray? {
+		val config = player.respawnConfig ?: return null
+		try {
+			val registryAccess = server!!.registryAccess()
+			val reporter = ProblemReporter.DISCARDING
+			val output = TagValueOutput.createWithContext(reporter, registryAccess)
+			output.store("respawn", net.minecraft.server.level.ServerPlayer.RespawnConfig.CODEC, config)
+			return compressTag(output.buildResult())
+		} catch (e: Exception) {
+			OfflineAuth.LOGGER.error("Failed to serialize respawn config", e)
+			return null
+		}
+	}
+
+	private fun deserializeRespawnConfig(player: ServerPlayer, data: ByteArray?) {
+		if (data == null) {
+			player.setRespawnPosition(null, false)
+			return
+		}
+		try {
+			val registryAccess = server!!.registryAccess()
+			val reporter = ProblemReporter.DISCARDING
+			val tag = decompressTag(data)
+			val input = TagValueInput.create(reporter, registryAccess, tag)
+			val result = input.read("respawn", net.minecraft.server.level.ServerPlayer.RespawnConfig.CODEC)
+			result.ifPresent { config ->
+				player.setRespawnPosition(config, false)
+			}
+		} catch (e: Exception) {
+			OfflineAuth.LOGGER.error("Failed to deserialize respawn config", e)
+		}
+	}
+
+	// --- Recipe book serialization ---
+
+	private fun serializeRecipeBook(player: ServerPlayer): ByteArray? {
+		try {
+			val packed = player.recipeBook.pack()
+			val registryAccess = server!!.registryAccess()
+			val reporter = ProblemReporter.DISCARDING
+			val output = TagValueOutput.createWithContext(reporter, registryAccess)
+			output.store("recipes", net.minecraft.stats.ServerRecipeBook.Packed.CODEC, packed)
+			return compressTag(output.buildResult())
+		} catch (e: Exception) {
+			OfflineAuth.LOGGER.error("Failed to serialize recipe book", e)
+			return null
+		}
+	}
+
+	private fun deserializeRecipeBook(player: ServerPlayer, data: ByteArray?) {
+		// Clear current recipe book
+		val recipeBook = player.recipeBook
+		(recipeBook as RecipeBookAccessor).known.clear()
+		(recipeBook as RecipeBookAccessor).highlight.clear()
+
+		if (data == null) return
+		try {
+			val registryAccess = server!!.registryAccess()
+			val reporter = ProblemReporter.DISCARDING
+			val tag = decompressTag(data)
+			val input = TagValueInput.create(reporter, registryAccess, tag)
+			val result = input.read("recipes", net.minecraft.stats.ServerRecipeBook.Packed.CODEC)
+			result.ifPresent { packed ->
+				recipeBook.loadUntrusted(packed) { true }
+			}
+			recipeBook.sendInitialRecipeBook(player)
+		} catch (e: Exception) {
+			OfflineAuth.LOGGER.error("Failed to deserialize recipe book", e)
+		}
+	}
+
+	// --- Advancements serialization (file-based) ---
+
+	private fun serializeAdvancements(player: ServerPlayer): ByteArray? {
+		try {
+			val advancements = player.advancements
+			advancements.save()
+			val srv = server ?: return null
+			val storageAccess = (srv as MinecraftServerAccessor).storageSource
+			val advancementsDir = storageAccess.getLevelPath(LevelResource.PLAYER_ADVANCEMENTS_DIR)
+			val advFile = advancementsDir.resolve("${player.uuid}.json")
+			if (Files.exists(advFile)) {
+				return Files.readAllBytes(advFile)
+			}
+		} catch (e: Exception) {
+			OfflineAuth.LOGGER.error("Failed to serialize advancements", e)
+		}
+		return null
+	}
+
+	private fun deserializeAdvancements(player: ServerPlayer, data: ByteArray?) {
+		try {
+			val srv = server ?: return
+			val storageAccess = (srv as MinecraftServerAccessor).storageSource
+			val advancementsDir = storageAccess.getLevelPath(LevelResource.PLAYER_ADVANCEMENTS_DIR)
+			val advFile = advancementsDir.resolve("${player.uuid}.json")
+			if (data != null) {
+				Files.createDirectories(advancementsDir)
+				Files.write(advFile, data)
+			} else {
+				// No saved advancements — write empty progress
+				Files.createDirectories(advancementsDir)
+				Files.writeString(advFile, "{}")
+			}
+			player.advancements.reload(srv.advancements)
+			player.advancements.flushDirty(player, true)
+		} catch (e: Exception) {
+			OfflineAuth.LOGGER.error("Failed to deserialize advancements", e)
+		}
+	}
+
+	// --- Stats serialization ---
+
+	private fun serializeStats(player: ServerPlayer): ByteArray? {
+		try {
+			val stats = player.stats
+			val jsonElement = (stats as ServerStatsCounterInvoker).invokeToJson()
+			val jsonString = com.google.gson.Gson().toJson(jsonElement)
+			return jsonString.toByteArray(Charsets.UTF_8)
+		} catch (e: Exception) {
+			OfflineAuth.LOGGER.error("Failed to serialize stats", e)
+			return null
+		}
+	}
+
+	private fun deserializeStats(player: ServerPlayer, data: ByteArray?) {
+		try {
+			val stats = player.stats
+			// Clear existing stats
+			(stats as StatsCounterAccessor).stats.clear()
+
+			if (data != null) {
+				val jsonString = String(data, Charsets.UTF_8)
+				val jsonElement = com.google.gson.JsonParser.parseString(jsonString)
+				val srv = server ?: return
+				stats.parse(srv.fixerUpper, jsonElement)
+			}
+			stats.markAllDirty()
+			stats.sendStats(player)
+		} catch (e: Exception) {
+			OfflineAuth.LOGGER.error("Failed to deserialize stats", e)
 		}
 	}
 

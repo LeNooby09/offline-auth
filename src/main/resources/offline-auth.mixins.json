@@ -11,9 +11,13 @@
     "GameProfileAccessor",
     "InventoryClickMixin",
     "ItemDropMixin",
+    "MinecraftServerAccessor",
     "NameTagMixin",
     "PlayerMovementMixin",
+    "RecipeBookAccessor",
     "ScoreboardNameMixin",
+    "ServerStatsCounterInvoker",
+    "StatsCounterAccessor",
     "TabListDisplayNameMixin"
   ],
   "injectors": {

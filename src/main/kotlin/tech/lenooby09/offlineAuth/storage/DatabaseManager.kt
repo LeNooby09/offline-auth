@@ -92,6 +92,19 @@ class DatabaseManager(dbPath: Path) {
                     ender_chest_data BLOB,
                     equipment_data BLOB,
                     exp INTEGER NOT NULL DEFAULT 0,
+                    exp_level INTEGER NOT NULL DEFAULT 0,
+                    exp_progress REAL NOT NULL DEFAULT 0.0,
+                    health REAL NOT NULL DEFAULT 20.0,
+                    food_level INTEGER NOT NULL DEFAULT 20,
+                    saturation REAL NOT NULL DEFAULT 5.0,
+                    game_mode TEXT NOT NULL DEFAULT 'SURVIVAL',
+                    selected_slot INTEGER NOT NULL DEFAULT 0,
+                    effects_data BLOB,
+                    is_flying INTEGER NOT NULL DEFAULT 0,
+                    respawn_data BLOB,
+                    recipes_data BLOB,
+                    advancements_data BLOB,
+                    stats_data BLOB,
                     updated_at INTEGER NOT NULL,
                     FOREIGN KEY (account_id) REFERENCES accounts(id)
                 )
@@ -237,6 +250,71 @@ class DatabaseManager(dbPath: Path) {
 		if (pdColumns.isNotEmpty() && "exp" !in pdColumns) {
 			conn.createStatement().use { stmt ->
 				stmt.executeUpdate("ALTER TABLE player_data ADD COLUMN exp INTEGER NOT NULL DEFAULT 0")
+			}
+		}
+		if (pdColumns.isNotEmpty() && "exp_level" !in pdColumns) {
+			conn.createStatement().use { stmt ->
+				stmt.executeUpdate("ALTER TABLE player_data ADD COLUMN exp_level INTEGER NOT NULL DEFAULT 0")
+			}
+		}
+		if (pdColumns.isNotEmpty() && "exp_progress" !in pdColumns) {
+			conn.createStatement().use { stmt ->
+				stmt.executeUpdate("ALTER TABLE player_data ADD COLUMN exp_progress REAL NOT NULL DEFAULT 0.0")
+			}
+		}
+		if (pdColumns.isNotEmpty() && "health" !in pdColumns) {
+			conn.createStatement().use { stmt ->
+				stmt.executeUpdate("ALTER TABLE player_data ADD COLUMN health REAL NOT NULL DEFAULT 20.0")
+			}
+		}
+		if (pdColumns.isNotEmpty() && "food_level" !in pdColumns) {
+			conn.createStatement().use { stmt ->
+				stmt.executeUpdate("ALTER TABLE player_data ADD COLUMN food_level INTEGER NOT NULL DEFAULT 20")
+			}
+		}
+		if (pdColumns.isNotEmpty() && "saturation" !in pdColumns) {
+			conn.createStatement().use { stmt ->
+				stmt.executeUpdate("ALTER TABLE player_data ADD COLUMN saturation REAL NOT NULL DEFAULT 5.0")
+			}
+		}
+		if (pdColumns.isNotEmpty() && "game_mode" !in pdColumns) {
+			conn.createStatement().use { stmt ->
+				stmt.executeUpdate("ALTER TABLE player_data ADD COLUMN game_mode TEXT NOT NULL DEFAULT 'SURVIVAL'")
+			}
+		}
+		if (pdColumns.isNotEmpty() && "selected_slot" !in pdColumns) {
+			conn.createStatement().use { stmt ->
+				stmt.executeUpdate("ALTER TABLE player_data ADD COLUMN selected_slot INTEGER NOT NULL DEFAULT 0")
+			}
+		}
+		if (pdColumns.isNotEmpty() && "effects_data" !in pdColumns) {
+			conn.createStatement().use { stmt ->
+				stmt.executeUpdate("ALTER TABLE player_data ADD COLUMN effects_data BLOB")
+			}
+		}
+ 	if (pdColumns.isNotEmpty() && "is_flying" !in pdColumns) {
+			conn.createStatement().use { stmt ->
+				stmt.executeUpdate("ALTER TABLE player_data ADD COLUMN is_flying INTEGER NOT NULL DEFAULT 0")
+			}
+		}
+		if (pdColumns.isNotEmpty() && "respawn_data" !in pdColumns) {
+			conn.createStatement().use { stmt ->
+				stmt.executeUpdate("ALTER TABLE player_data ADD COLUMN respawn_data BLOB")
+			}
+		}
+		if (pdColumns.isNotEmpty() && "recipes_data" !in pdColumns) {
+			conn.createStatement().use { stmt ->
+				stmt.executeUpdate("ALTER TABLE player_data ADD COLUMN recipes_data BLOB")
+			}
+		}
+		if (pdColumns.isNotEmpty() && "advancements_data" !in pdColumns) {
+			conn.createStatement().use { stmt ->
+				stmt.executeUpdate("ALTER TABLE player_data ADD COLUMN advancements_data BLOB")
+			}
+		}
+		if (pdColumns.isNotEmpty() && "stats_data" !in pdColumns) {
+			conn.createStatement().use { stmt ->
+				stmt.executeUpdate("ALTER TABLE player_data ADD COLUMN stats_data BLOB")
 			}
 		}
 	}
@@ -413,33 +491,101 @@ class DatabaseManager(dbPath: Path) {
 		}
 	}
 
-	fun savePlayerData(accountId: UUID, inventoryData: ByteArray?, enderChestData: ByteArray?, equipmentData: ByteArray?, exp: Int) {
+	fun savePlayerData(
+		accountId: UUID,
+		inventoryData: ByteArray?,
+		enderChestData: ByteArray?,
+		equipmentData: ByteArray?,
+		exp: Int,
+		expLevel: Int,
+		expProgress: Float,
+		health: Float,
+		foodLevel: Int,
+		saturation: Float,
+		gameMode: String,
+		selectedSlot: Int,
+		effectsData: ByteArray?,
+		isFlying: Boolean,
+		respawnData: ByteArray?,
+		recipesData: ByteArray?,
+		advancementsData: ByteArray?,
+		statsData: ByteArray?,
+	) {
 		connection().use { conn ->
 			conn.prepareStatement(
-				"INSERT OR REPLACE INTO player_data (account_id, inventory_data, ender_chest_data, equipment_data, exp, updated_at) VALUES (?, ?, ?, ?, ?, ?)"
+				"INSERT OR REPLACE INTO player_data (account_id, inventory_data, ender_chest_data, equipment_data, exp, exp_level, exp_progress, health, food_level, saturation, game_mode, selected_slot, effects_data, is_flying, respawn_data, recipes_data, advancements_data, stats_data, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
 			).use { stmt ->
 				stmt.setString(1, accountId.toString())
 				stmt.setBytes(2, inventoryData)
 				stmt.setBytes(3, enderChestData)
 				stmt.setBytes(4, equipmentData)
 				stmt.setInt(5, exp)
-				stmt.setLong(6, System.currentTimeMillis())
+				stmt.setInt(6, expLevel)
+				stmt.setFloat(7, expProgress)
+				stmt.setFloat(8, health)
+				stmt.setInt(9, foodLevel)
+				stmt.setFloat(10, saturation)
+				stmt.setString(11, gameMode)
+				stmt.setInt(12, selectedSlot)
+				stmt.setBytes(13, effectsData)
+				stmt.setInt(14, if (isFlying) 1 else 0)
+				stmt.setBytes(15, respawnData)
+				stmt.setBytes(16, recipesData)
+				stmt.setBytes(17, advancementsData)
+				stmt.setBytes(18, statsData)
+				stmt.setLong(19, System.currentTimeMillis())
 				stmt.executeUpdate()
 			}
 		}
 	}
 
-	data class PlayerData(val inventoryData: ByteArray?, val enderChestData: ByteArray?, val equipmentData: ByteArray?, val exp: Int)
+	data class PlayerData(
+		val inventoryData: ByteArray?,
+		val enderChestData: ByteArray?,
+		val equipmentData: ByteArray?,
+		val exp: Int,
+		val expLevel: Int,
+		val expProgress: Float,
+		val health: Float,
+		val foodLevel: Int,
+		val saturation: Float,
+		val gameMode: String,
+		val selectedSlot: Int,
+		val effectsData: ByteArray?,
+		val isFlying: Boolean,
+		val respawnData: ByteArray?,
+		val recipesData: ByteArray?,
+		val advancementsData: ByteArray?,
+		val statsData: ByteArray?,
+	)
 
 	fun loadPlayerData(accountId: UUID): PlayerData? {
 		connection().use { conn ->
 			conn.prepareStatement(
-				"SELECT inventory_data, ender_chest_data, equipment_data, exp FROM player_data WHERE account_id = ?"
+				"SELECT inventory_data, ender_chest_data, equipment_data, exp, exp_level, exp_progress, health, food_level, saturation, game_mode, selected_slot, effects_data, is_flying, respawn_data, recipes_data, advancements_data, stats_data FROM player_data WHERE account_id = ?"
 			).use { stmt ->
 				stmt.setString(1, accountId.toString())
 				val rs = stmt.executeQuery()
 				if (rs.next()) {
-					return PlayerData(rs.getBytes("inventory_data"), rs.getBytes("ender_chest_data"), rs.getBytes("equipment_data"), rs.getInt("exp"))
+					return PlayerData(
+						inventoryData = rs.getBytes("inventory_data"),
+						enderChestData = rs.getBytes("ender_chest_data"),
+						equipmentData = rs.getBytes("equipment_data"),
+						exp = rs.getInt("exp"),
+						expLevel = rs.getInt("exp_level"),
+						expProgress = rs.getFloat("exp_progress"),
+						health = rs.getFloat("health"),
+						foodLevel = rs.getInt("food_level"),
+						saturation = rs.getFloat("saturation"),
+						gameMode = rs.getString("game_mode"),
+						selectedSlot = rs.getInt("selected_slot"),
+						effectsData = rs.getBytes("effects_data"),
+						isFlying = rs.getInt("is_flying") != 0,
+						respawnData = rs.getBytes("respawn_data"),
+						recipesData = rs.getBytes("recipes_data"),
+						advancementsData = rs.getBytes("advancements_data"),
+						statsData = rs.getBytes("stats_data"),
+					)
 				}
 			}
 		}
