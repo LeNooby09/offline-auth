@@ -501,8 +501,11 @@ class AuthManager(val database: DatabaseManager, var config: OfflineAuthConfig) 
 			val eqTag = eqOutput.buildResult()
 			val eqBytes = compressTag(eqTag)
 
+			// Save experience
+			val exp = player.totalExperience
+
 			// Offload the DB write after serialization is done on the main thread
-			runAsyncFire { database.savePlayerData(account.id, invBytes, ecBytes, eqBytes) }
+			runAsyncFire { database.savePlayerData(account.id, invBytes, ecBytes, eqBytes, exp) }
 		} catch (e: Exception) {
 			OfflineAuth.LOGGER.error("Failed to save inventory for account ${account.username}", e)
 		}
@@ -542,6 +545,12 @@ class AuthManager(val database: DatabaseManager, var config: OfflineAuthConfig) 
 					player.setItemSlot(slot, ItemStack.EMPTY)
 				}
 			}
+
+			// Restore experience
+			player.setExperiencePoints(0)
+			player.experienceLevel = 0
+			player.experienceProgress = 0f
+			player.giveExperiencePoints(data.exp)
 
 			// Sync to client
 			player.containerMenu.broadcastChanges()
