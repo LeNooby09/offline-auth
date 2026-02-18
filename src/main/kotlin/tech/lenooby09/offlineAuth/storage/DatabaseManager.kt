@@ -105,6 +105,11 @@ class DatabaseManager(dbPath: Path) {
                     recipes_data BLOB,
                     advancements_data BLOB,
                     stats_data BLOB,
+                    food_exhaustion REAL NOT NULL DEFAULT 0.0,
+                    food_tick_timer INTEGER NOT NULL DEFAULT 0,
+                    score INTEGER NOT NULL DEFAULT 0,
+                    fire_ticks INTEGER NOT NULL DEFAULT 0,
+                    air_supply INTEGER NOT NULL DEFAULT 300,
                     updated_at INTEGER NOT NULL,
                     FOREIGN KEY (account_id) REFERENCES accounts(id)
                 )
@@ -317,6 +322,31 @@ class DatabaseManager(dbPath: Path) {
 				stmt.executeUpdate("ALTER TABLE player_data ADD COLUMN stats_data BLOB")
 			}
 		}
+		if (pdColumns.isNotEmpty() && "food_exhaustion" !in pdColumns) {
+			conn.createStatement().use { stmt ->
+				stmt.executeUpdate("ALTER TABLE player_data ADD COLUMN food_exhaustion REAL NOT NULL DEFAULT 0.0")
+			}
+		}
+		if (pdColumns.isNotEmpty() && "food_tick_timer" !in pdColumns) {
+			conn.createStatement().use { stmt ->
+				stmt.executeUpdate("ALTER TABLE player_data ADD COLUMN food_tick_timer INTEGER NOT NULL DEFAULT 0")
+			}
+		}
+		if (pdColumns.isNotEmpty() && "score" !in pdColumns) {
+			conn.createStatement().use { stmt ->
+				stmt.executeUpdate("ALTER TABLE player_data ADD COLUMN score INTEGER NOT NULL DEFAULT 0")
+			}
+		}
+		if (pdColumns.isNotEmpty() && "fire_ticks" !in pdColumns) {
+			conn.createStatement().use { stmt ->
+				stmt.executeUpdate("ALTER TABLE player_data ADD COLUMN fire_ticks INTEGER NOT NULL DEFAULT 0")
+			}
+		}
+		if (pdColumns.isNotEmpty() && "air_supply" !in pdColumns) {
+			conn.createStatement().use { stmt ->
+				stmt.executeUpdate("ALTER TABLE player_data ADD COLUMN air_supply INTEGER NOT NULL DEFAULT 300")
+			}
+		}
 	}
 
 	// --- Account operations ---
@@ -510,10 +540,15 @@ class DatabaseManager(dbPath: Path) {
 		recipesData: ByteArray?,
 		advancementsData: ByteArray?,
 		statsData: ByteArray?,
+		foodExhaustion: Float,
+		foodTickTimer: Int,
+		score: Int,
+		fireTicks: Int,
+		airSupply: Int,
 	) {
 		connection().use { conn ->
 			conn.prepareStatement(
-				"INSERT OR REPLACE INTO player_data (account_id, inventory_data, ender_chest_data, equipment_data, exp, exp_level, exp_progress, health, food_level, saturation, game_mode, selected_slot, effects_data, is_flying, respawn_data, recipes_data, advancements_data, stats_data, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+				"INSERT OR REPLACE INTO player_data (account_id, inventory_data, ender_chest_data, equipment_data, exp, exp_level, exp_progress, health, food_level, saturation, game_mode, selected_slot, effects_data, is_flying, respawn_data, recipes_data, advancements_data, stats_data, food_exhaustion, food_tick_timer, score, fire_ticks, air_supply, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
 			).use { stmt ->
 				stmt.setString(1, accountId.toString())
 				stmt.setBytes(2, inventoryData)
@@ -533,7 +568,12 @@ class DatabaseManager(dbPath: Path) {
 				stmt.setBytes(16, recipesData)
 				stmt.setBytes(17, advancementsData)
 				stmt.setBytes(18, statsData)
-				stmt.setLong(19, System.currentTimeMillis())
+				stmt.setFloat(19, foodExhaustion)
+				stmt.setInt(20, foodTickTimer)
+				stmt.setInt(21, score)
+				stmt.setInt(22, fireTicks)
+				stmt.setInt(23, airSupply)
+				stmt.setLong(24, System.currentTimeMillis())
 				stmt.executeUpdate()
 			}
 		}
@@ -557,12 +597,17 @@ class DatabaseManager(dbPath: Path) {
 		val recipesData: ByteArray?,
 		val advancementsData: ByteArray?,
 		val statsData: ByteArray?,
+		val foodExhaustion: Float,
+		val foodTickTimer: Int,
+		val score: Int,
+		val fireTicks: Int,
+		val airSupply: Int,
 	)
 
 	fun loadPlayerData(accountId: UUID): PlayerData? {
 		connection().use { conn ->
 			conn.prepareStatement(
-				"SELECT inventory_data, ender_chest_data, equipment_data, exp, exp_level, exp_progress, health, food_level, saturation, game_mode, selected_slot, effects_data, is_flying, respawn_data, recipes_data, advancements_data, stats_data FROM player_data WHERE account_id = ?"
+				"SELECT inventory_data, ender_chest_data, equipment_data, exp, exp_level, exp_progress, health, food_level, saturation, game_mode, selected_slot, effects_data, is_flying, respawn_data, recipes_data, advancements_data, stats_data, food_exhaustion, food_tick_timer, score, fire_ticks, air_supply FROM player_data WHERE account_id = ?"
 			).use { stmt ->
 				stmt.setString(1, accountId.toString())
 				val rs = stmt.executeQuery()
@@ -585,6 +630,11 @@ class DatabaseManager(dbPath: Path) {
 						recipesData = rs.getBytes("recipes_data"),
 						advancementsData = rs.getBytes("advancements_data"),
 						statsData = rs.getBytes("stats_data"),
+						foodExhaustion = rs.getFloat("food_exhaustion"),
+						foodTickTimer = rs.getInt("food_tick_timer"),
+						score = rs.getInt("score"),
+						fireTicks = rs.getInt("fire_ticks"),
+						airSupply = rs.getInt("air_supply"),
 					)
 				}
 			}

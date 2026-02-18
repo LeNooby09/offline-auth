@@ -8,6 +8,7 @@
     "ConnectionAccessor",
     "DisplayNameMixin",
     "EquipmentAccessor",
+    "FoodDataAccessor",
     "GameProfileAccessor",
     "InventoryClickMixin",
     "ItemDropMixin",

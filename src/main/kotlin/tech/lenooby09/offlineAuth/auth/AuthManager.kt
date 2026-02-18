@@ -22,6 +22,7 @@ import net.minecraft.world.level.storage.TagValueOutput
 import tech.lenooby09.offlineAuth.OfflineAuth
 import tech.lenooby09.offlineAuth.config.OfflineAuthConfig
 import tech.lenooby09.offlineAuth.mixin.EquipmentAccessor
+import tech.lenooby09.offlineAuth.mixin.FoodDataAccessor
 import tech.lenooby09.offlineAuth.mixin.GameProfileAccessor
 import tech.lenooby09.offlineAuth.mixin.MinecraftServerAccessor
 import tech.lenooby09.offlineAuth.mixin.RecipeBookAccessor
@@ -529,6 +530,17 @@ class AuthManager(val database: DatabaseManager, var config: OfflineAuthConfig) 
 			// Save flying state
 			val isFlying = player.abilities.flying
 
+			// Save food exhaustion and tick timer
+			val foodExhaustion = (player.foodData as FoodDataAccessor).exhaustionLevel
+			val foodTickTimer = (player.foodData as FoodDataAccessor).tickTimer
+
+			// Save score
+			val score = player.score
+
+			// Save fire ticks and air supply
+			val fireTicks = player.remainingFireTicks
+			val airSupply = player.airSupply
+
 			// Serialize respawn point
 			val respawnBytes = serializeRespawnConfig(player)
 
@@ -546,7 +558,8 @@ class AuthManager(val database: DatabaseManager, var config: OfflineAuthConfig) 
 				database.savePlayerData(
 					account.id, invBytes, ecBytes, eqBytes, exp, expLevel, expProgress,
 					health, foodLevel, saturation, gameMode, selectedSlot, effectsBytes, isFlying,
-					respawnBytes, recipesBytes, advancementsBytes, statsBytes
+					respawnBytes, recipesBytes, advancementsBytes, statsBytes,
+					foodExhaustion, foodTickTimer, score, fireTicks, airSupply
 				)
 			}
 		} catch (e: Exception) {
@@ -632,6 +645,17 @@ class AuthManager(val database: DatabaseManager, var config: OfflineAuthConfig) 
 
 			// Restore stats
 			deserializeStats(player, data.statsData)
+
+			// Restore food exhaustion and tick timer
+			(player.foodData as FoodDataAccessor).setExhaustionLevel(data.foodExhaustion)
+			(player.foodData as FoodDataAccessor).setTickTimer(data.foodTickTimer)
+
+			// Restore score
+			player.score = data.score
+
+			// Restore fire ticks and air supply
+			player.remainingFireTicks = data.fireTicks
+			player.airSupply = data.airSupply
 
 			// Sync to client
 			player.containerMenu.broadcastChanges()
