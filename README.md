@@ -18,8 +18,9 @@ OfflineAuth requires players to register with an invite code and log in with a p
 - **Hidden join message** — optionally suppress the "Player joined the game" broadcast until the player authenticates.
 - **Configurable timeouts and bans** — adjustable auth timeout, soft-ban duration, max login attempts, and minimum password length.
 - **Admin commands** — generate and manage invite codes, create/delete/rename accounts, and hot-reload config.
-- **First-boot invite code** — on a fresh install with no accounts, a one-time admin invite code is printed to the server log.
+- **First-boot invite code** — on a fresh install with no accounts, a one-time admin invite code is printed to the server log. The first account registered with this code is automatically granted web dashboard admin permissions.
 - **Command aliases** — `/r` for `/register`, `/l` for `/login`, `/ls` for `/login_as`.
+- **Web dashboard** — optional embedded web dashboard for managing accounts, invite codes, sessions, and bans through a browser. Supports role-based access: dashboard admins get full control, regular users see basic stats only.
 
 ## Requirements
 
@@ -34,7 +35,7 @@ OfflineAuth requires players to register with an invite code and log in with a p
 2. Install the Fabric Language Kotlin mod.
 3. Drop the OfflineAuth jar into the server `mods/` folder.
 4. Start the server. A config file will be generated at `config/offline-auth/config.yml` and a one-time admin invite code will be printed in the server log.
-5. Use the invite code to register the first (admin) account.
+5. Use the invite code to register the first (admin) account. This account automatically receives web dashboard admin permissions.
 
 ## Commands
 
@@ -82,6 +83,56 @@ The configuration file is located at `config/offline-auth/config.yml` and is gen
 | `login-lockout-base-seconds` | 30 | Base lockout duration in seconds after max failed login attempts (doubles each time). |
 | `login-lockout-max-seconds` | 3600 | Maximum lockout duration in seconds (cap for exponential backoff). |
 | `hide-join-message-until-login` | false | Whether to hide the "Player joined the game" message until the player authenticates. |
+| `web-dashboard-enabled` | false | Whether to enable the embedded web dashboard for account management. |
+| `web-dashboard-port` | 8080 | Port for the web dashboard HTTP server. |
+| `web-dashboard-bind-address` | 127.0.0.1 | Bind address for the web dashboard (`127.0.0.1` = localhost only, `0.0.0.0` = all interfaces). |
+
+## Web Dashboard
+
+OfflineAuth includes an optional embedded web dashboard for managing accounts, invite codes, sessions, and soft bans through a browser.
+
+### Enabling the Dashboard
+
+Set `web-dashboard-enabled: true` in `config/offline-auth/config.yml` and reload with `/offlineauth reload` or restart the server. The dashboard will be available at `http://<bind-address>:<port>/` (default: `http://127.0.0.1:8080/`).
+
+### Permissions
+
+The dashboard uses role-based access stored in the database:
+
+- **Admin users** see all management tabs (accounts, invite codes, sessions, soft bans) and can perform all operations including creating/deleting accounts, managing invite codes, granting/revoking dashboard admin, and reloading config.
+- **Regular users** can log in but only see basic server stats (total accounts, online players, active sessions, invites, bans). They cannot access any management features.
+
+The first account registered with the SYSTEM-generated first-boot invite code is automatically granted dashboard admin. Admins can grant or revoke dashboard admin permissions for other accounts from the Accounts tab.
+
+### REST API
+
+The dashboard exposes a REST API for programmatic access. Authenticate by sending a `POST /api/login` request and use the returned token as a `Bearer` token in subsequent requests.
+
+| Method | Endpoint | Auth | Description |
+|---|---|---|---|
+| POST | `/api/login` | None | Authenticate with username and password. Returns a session token and admin status. |
+| POST | `/api/logout` | Any | Invalidate the current session token. |
+| GET | `/api/me` | Any | Get the currently authenticated username and admin status. |
+| GET | `/api/stats` | Any | Get server statistics. |
+| GET | `/api/accounts` | Admin | List all accounts. |
+| GET | `/api/accounts/:id` | Admin | Get account details and linked UUIDs. |
+| POST | `/api/accounts` | Admin | Create a new account (JSON body: `username`, `password`). |
+| DELETE | `/api/accounts/:id` | Admin | Delete an account. |
+| PUT | `/api/accounts/:id/rename` | Admin | Rename an account (JSON body: `newUsername`). |
+| PUT | `/api/accounts/:id/password` | Admin | Change an account's password (JSON body: `newPassword`). |
+| PUT | `/api/accounts/:id/admin` | Admin | Grant or revoke dashboard admin (JSON body: `isAdmin`). |
+| GET | `/api/invites` | Admin | List active invite codes. |
+| POST | `/api/invites` | Admin | Generate a new invite code (JSON body: `maxUses`). |
+| DELETE | `/api/invites/:code` | Admin | Revoke an invite code. |
+| GET | `/api/sessions` | Admin | List active sessions. |
+| GET | `/api/bans` | Admin | List active soft bans. |
+| DELETE | `/api/bans/:ip` | Admin | Remove a soft ban. |
+| POST | `/api/config/reload` | Admin | Hot-reload the configuration file. |
+
+### Security Notes
+
+- The dashboard runs over **HTTP** by default. For production use, place it behind a reverse proxy (e.g., nginx or Caddy) with HTTPS.
+- Bind to `127.0.0.1` (default) to restrict access to localhost. Only change to `0.0.0.0` if you have a reverse proxy or firewall in place.
 
 ## License
 

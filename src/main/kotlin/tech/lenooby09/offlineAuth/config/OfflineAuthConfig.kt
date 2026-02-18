@@ -20,6 +20,9 @@ data class OfflineAuthConfig(
 	val loginLockoutBaseSeconds: Long = 30L,
 	val loginLockoutMaxSeconds: Long = 3600L,
 	val hideJoinMessageUntilLogin: Boolean = false,
+	val webDashboardEnabled: Boolean = false,
+	val webDashboardPort: Int = 8080,
+	val webDashboardBindAddress: String = "127.0.0.1",
 ) {
 
 	companion object {
@@ -42,6 +45,9 @@ data class OfflineAuthConfig(
 			"login-lockout-base-seconds" to "# Base lockout duration in seconds after max failed login attempts (doubles each time)",
 			"login-lockout-max-seconds" to "# Maximum lockout duration in seconds (cap for exponential backoff)",
 			"hide-join-message-until-login" to "# Whether to hide the join message until the player authenticates (default: false)",
+			"web-dashboard-enabled" to "# Whether to enable the embedded web dashboard for account management",
+			"web-dashboard-port" to "# Port for the web dashboard HTTP server",
+			"web-dashboard-bind-address" to "# Bind address for the web dashboard (127.0.0.1 = localhost only, 0.0.0.0 = all interfaces)",
 		)
 
 		fun load(configDir: Path): OfflineAuthConfig {
@@ -84,6 +90,9 @@ data class OfflineAuthConfig(
 					loginLockoutBaseSeconds = values["login-lockout-base-seconds"]?.toLongOrNull() ?: 30L,
 					loginLockoutMaxSeconds = values["login-lockout-max-seconds"]?.toLongOrNull() ?: 3600L,
 					hideJoinMessageUntilLogin = values["hide-join-message-until-login"]?.toBooleanStrictOrNull() ?: false,
+					webDashboardEnabled = values["web-dashboard-enabled"]?.toBooleanStrictOrNull() ?: false,
+					webDashboardPort = values["web-dashboard-port"]?.toIntOrNull() ?: 8080,
+					webDashboardBindAddress = values["web-dashboard-bind-address"] ?: "127.0.0.1",
 				)
 			} catch (e: Exception) {
 				OfflineAuth.LOGGER.error("Failed to load config, using defaults", e)
@@ -115,6 +124,9 @@ data class OfflineAuthConfig(
 			"login-lockout-base-seconds" to loginLockoutBaseSeconds.toString(),
 			"login-lockout-max-seconds" to loginLockoutMaxSeconds.toString(),
 			"hide-join-message-until-login" to hideJoinMessageUntilLogin.toString(),
+			"web-dashboard-enabled" to webDashboardEnabled.toString(),
+			"web-dashboard-port" to webDashboardPort.toString(),
+			"web-dashboard-bind-address" to webDashboardBindAddress,
 		)
 
 		val builder = StringBuilder()

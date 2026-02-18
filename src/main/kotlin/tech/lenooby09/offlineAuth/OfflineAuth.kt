@@ -17,6 +17,7 @@ import tech.lenooby09.offlineAuth.commands.LoginCommand
 import tech.lenooby09.offlineAuth.commands.RegisterCommand
 import tech.lenooby09.offlineAuth.config.OfflineAuthConfig
 import tech.lenooby09.offlineAuth.storage.DatabaseManager
+import tech.lenooby09.offlineAuth.web.WebDashboard
 
 class OfflineAuth : ModInitializer {
 
@@ -31,6 +32,9 @@ class OfflineAuth : ModInitializer {
 			internal set
 
 		var configDir: java.nio.file.Path? = null
+			private set
+
+		var webDashboard: WebDashboard? = null
 			private set
 	}
 
@@ -52,8 +56,21 @@ class OfflineAuth : ModInitializer {
 		registerCommands(manager)
 		registerEvents(manager)
 
+		// Start web dashboard if enabled
+		if (config.webDashboardEnabled) {
+			try {
+				val dashboard = WebDashboard(database, manager, config)
+				dashboard.start()
+				webDashboard = dashboard
+			} catch (e: Exception) {
+				LOGGER.error("Failed to start web dashboard", e)
+			}
+		}
+
 		ServerLifecycleEvents.SERVER_STOPPING.register {
 			LOGGER.info("OfflineAuth shutting down...")
+			webDashboard?.stop()
+			webDashboard = null
 			manager.shutdown()
 		}
 

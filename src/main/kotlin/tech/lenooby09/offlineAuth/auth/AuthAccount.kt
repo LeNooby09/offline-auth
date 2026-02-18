@@ -7,4 +7,5 @@ data class AuthAccount(
 	val username: String,
 	val passwordHash: String,
 	val registeredAt: Long,
+	val isDashboardAdmin: Boolean = false,
 )

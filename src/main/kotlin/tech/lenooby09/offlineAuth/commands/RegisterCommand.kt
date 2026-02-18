@@ -75,7 +75,7 @@ object RegisterCommand {
 
 		// Offload BCrypt hashing and DB writes to the IO executor
 		authManager.runAsync({
-			val code = authManager.database.getInviteCode(inviteCode)
+ 		val code = authManager.database.getInviteCode(inviteCode)
 			if (code == null || code.currentUses >= code.maxUses) {
 				return@runAsync "§cInvalid or expired invite code." to null
 			}
@@ -84,11 +84,15 @@ object RegisterCommand {
 				return@runAsync "§cUsername already taken." to null
 			}
 
+			// Grant dashboard admin if this is the first-boot SYSTEM invite code
+			val grantAdmin = code.createdBy == "SYSTEM" && !authManager.database.hasAnyAccounts()
+
 			val account = AuthAccount(
 				id = UUID.randomUUID(),
 				username = username,
 				passwordHash = BCrypt.withDefaults().hashToString(12, password.toCharArray()),
 				registeredAt = System.currentTimeMillis(),
+				isDashboardAdmin = grantAdmin,
 			)
 
 			try {

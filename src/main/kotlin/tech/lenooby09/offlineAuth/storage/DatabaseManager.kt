@@ -45,7 +45,8 @@ class DatabaseManager(dbPath: Path) {
                     id TEXT PRIMARY KEY,
                     username TEXT NOT NULL UNIQUE,
                     password_hash TEXT NOT NULL,
-                    registered_at INTEGER NOT NULL
+                    registered_at INTEGER NOT NULL,
+                    is_dashboard_admin INTEGER NOT NULL DEFAULT 0
                 )
                 """.trimIndent()
 				)
@@ -236,6 +237,20 @@ class DatabaseManager(dbPath: Path) {
 			}
 
 			migratePlayerDataSchema(conn)
+
+			// Migrate accounts table
+			val accColumns = mutableSetOf<String>()
+			conn.createStatement().use { stmt ->
+				val rs = stmt.executeQuery("PRAGMA table_info(accounts)")
+				while (rs.next()) {
+					accColumns.add(rs.getString("name"))
+				}
+			}
+			if (accColumns.isNotEmpty() && "is_dashboard_admin" !in accColumns) {
+				conn.createStatement().use { stmt ->
+					stmt.executeUpdate("ALTER TABLE accounts ADD COLUMN is_dashboard_admin INTEGER NOT NULL DEFAULT 0")
+				}
+			}
 		}
 	}
 
@@ -354,12 +369,13 @@ class DatabaseManager(dbPath: Path) {
 	fun saveAccount(account: AuthAccount) {
 		connection().use { conn ->
 			conn.prepareStatement(
-				"INSERT INTO accounts (id, username, password_hash, registered_at) VALUES (?, ?, ?, ?)"
+				"INSERT INTO accounts (id, username, password_hash, registered_at, is_dashboard_admin) VALUES (?, ?, ?, ?, ?)"
 			).use { stmt ->
 				stmt.setString(1, account.id.toString())
 				stmt.setString(2, account.username)
 				stmt.setString(3, account.passwordHash)
 				stmt.setLong(4, account.registeredAt)
+				stmt.setInt(5, if (account.isDashboardAdmin) 1 else 0)
 				stmt.executeUpdate()
 			}
 		}
@@ -368,7 +384,7 @@ class DatabaseManager(dbPath: Path) {
 	fun getAccountByUsername(username: String): AuthAccount? {
 		connection().use { conn ->
 			conn.prepareStatement(
-				"SELECT id, username, password_hash, registered_at FROM accounts WHERE LOWER(username) = LOWER(?)"
+				"SELECT id, username, password_hash, registered_at, is_dashboard_admin FROM accounts WHERE LOWER(username) = LOWER(?)"
 			).use { stmt ->
 				stmt.setString(1, username)
 				val rs = stmt.executeQuery()
@@ -378,6 +394,7 @@ class DatabaseManager(dbPath: Path) {
 						username = rs.getString("username"),
 						passwordHash = rs.getString("password_hash"),
 						registeredAt = rs.getLong("registered_at"),
+						isDashboardAdmin = rs.getInt("is_dashboard_admin") == 1,
 					)
 				}
 			}
@@ -389,7 +406,7 @@ class DatabaseManager(dbPath: Path) {
 		connection().use { conn ->
 			conn.prepareStatement(
 				"""
-            SELECT a.id, a.username, a.password_hash, a.registered_at
+            SELECT a.id, a.username, a.password_hash, a.registered_at, a.is_dashboard_admin
             FROM accounts a
             JOIN account_links l ON a.id = l.account_id
             WHERE l.minecraft_uuid = ?
@@ -403,6 +420,7 @@ class DatabaseManager(dbPath: Path) {
 						username = rs.getString("username"),
 						passwordHash = rs.getString("password_hash"),
 						registeredAt = rs.getLong("registered_at"),
+						isDashboardAdmin = rs.getInt("is_dashboard_admin") == 1,
 					)
 				}
 			}
@@ -936,6 +954,18 @@ class DatabaseManager(dbPath: Path) {
 		}
 	}
 
+	fun setDashboardAdmin(accountId: UUID, isAdmin: Boolean) {
+		connection().use { conn ->
+			conn.prepareStatement(
+				"UPDATE accounts SET is_dashboard_admin = ? WHERE id = ?"
+			).use { stmt ->
+				stmt.setInt(1, if (isAdmin) 1 else 0)
+				stmt.setString(2, accountId.toString())
+				stmt.executeUpdate()
+			}
+		}
+	}
+
 	fun updateUsername(accountId: UUID, newUsername: String): Boolean {
 		connection().use { conn ->
 			conn.prepareStatement(
@@ -996,6 +1026,86 @@ class DatabaseManager(dbPath: Path) {
 			}
 		}
 	}
+
+	fun getAllAccounts(): List<AuthAccount> {
+		val accounts = mutableListOf<AuthAccount>()
+		connection().use { conn ->
+			conn.createStatement().use { stmt ->
+				val rs = stmt.executeQuery("SELECT id, username, password_hash, registered_at, is_dashboard_admin FROM accounts ORDER BY username")
+				while (rs.next()) {
+					accounts.add(
+						AuthAccount(
+							id = UUID.fromString(rs.getString("id")),
+							username = rs.getString("username"),
+							passwordHash = rs.getString("password_hash"),
+							registeredAt = rs.getLong("registered_at"),
+							isDashboardAdmin = rs.getInt("is_dashboard_admin") == 1,
+						)
+					)
+				}
+			}
+		}
+		return accounts
+	}
+
+	data class SoftBanRecord(val ipAddress: String, val expiresAt: Long)
+
+	fun getActiveSoftBans(): List<SoftBanRecord> {
+		val bans = mutableListOf<SoftBanRecord>()
+		connection().use { conn ->
+			conn.prepareStatement(
+				"SELECT ip_address, expires_at FROM soft_bans WHERE expires_at > ?"
+			).use { stmt ->
+				stmt.setLong(1, System.currentTimeMillis())
+				val rs = stmt.executeQuery()
+				while (rs.next()) {
+					bans.add(SoftBanRecord(rs.getString("ip_address"), rs.getLong("expires_at")))
+				}
+			}
+		}
+		return bans
+	}
+
+	fun getLinkedUUIDs(accountId: UUID): List<String> {
+		val uuids = mutableListOf<String>()
+		connection().use { conn ->
+			conn.prepareStatement(
+				"SELECT minecraft_uuid FROM account_links WHERE account_id = ?"
+			).use { stmt ->
+				stmt.setString(1, accountId.toString())
+				val rs = stmt.executeQuery()
+				while (rs.next()) {
+					uuids.add(rs.getString("minecraft_uuid"))
+				}
+			}
+		}
+		return uuids
+	}
+
+	fun getActiveSessions(): List<SessionRecord> {
+		val sessions = mutableListOf<SessionRecord>()
+		connection().use { conn ->
+			conn.prepareStatement(
+				"SELECT s.account_id, a.username, s.ip_address, s.expires_at FROM auth_sessions s JOIN accounts a ON s.account_id = a.id WHERE s.expires_at > ?"
+			).use { stmt ->
+				stmt.setLong(1, System.currentTimeMillis())
+				val rs = stmt.executeQuery()
+				while (rs.next()) {
+					sessions.add(
+						SessionRecord(
+							accountId = rs.getString("account_id"),
+							username = rs.getString("username"),
+							ipAddress = rs.getString("ip_address"),
+							expiresAt = rs.getLong("expires_at"),
+						)
+					)
+				}
+			}
+		}
+		return sessions
+	}
+
+	data class SessionRecord(val accountId: String, val username: String, val ipAddress: String, val expiresAt: Long)
 
 	fun close() {
 		if (!dataSource.isClosed) {

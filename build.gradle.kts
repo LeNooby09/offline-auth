@@ -3,6 +3,7 @@ import org.jetbrains.kotlin.gradle.tasks.KotlinCompile
 
 plugins {
 	kotlin("jvm") version "2.3.10"
+	kotlin("plugin.serialization") version "2.3.10"
 	id("fabric-loom") version "1.15-SNAPSHOT"
 	id("maven-publish")
 }
@@ -58,6 +59,24 @@ dependencies {
 	include("org.slf4j:slf4j-api:2.0.16")
 	include(implementation("at.favre.lib:bcrypt:0.10.2")!!)
 	include("at.favre.lib:bytes:1.5.0")
+
+	// Ktor embedded web server (CIO engine to avoid Netty conflicts with Minecraft)
+	val ktorVersion = "3.4.0"
+	include(implementation("io.ktor:ktor-server-core:$ktorVersion")!!)
+	include(implementation("io.ktor:ktor-server-cio:$ktorVersion")!!)
+	include(implementation("io.ktor:ktor-network:$ktorVersion")!!)
+	include(implementation("io.ktor:ktor-http-cio:$ktorVersion")!!)
+	include(implementation("io.ktor:ktor-server-content-negotiation:$ktorVersion")!!)
+	include(implementation("io.ktor:ktor-serialization-kotlinx-json:$ktorVersion")!!)
+	include(implementation("io.ktor:ktor-serialization-kotlinx:$ktorVersion")!!)
+	include(implementation("io.ktor:ktor-server-cors:$ktorVersion")!!)
+	include(implementation("io.ktor:ktor-server-host-common:$ktorVersion")!!)
+	include(implementation("io.ktor:ktor-events:$ktorVersion")!!)
+	include(implementation("io.ktor:ktor-http:$ktorVersion")!!)
+	include(implementation("io.ktor:ktor-utils:$ktorVersion")!!)
+	include(implementation("io.ktor:ktor-io:$ktorVersion")!!)
+	include(implementation("io.ktor:ktor-serialization:$ktorVersion")!!)
+	include(implementation("org.jetbrains.kotlinx:kotlinx-io-core:0.6.0")!!)
 }
 
 tasks.jar {
