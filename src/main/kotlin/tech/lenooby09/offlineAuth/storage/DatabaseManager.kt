@@ -733,6 +733,18 @@ class DatabaseManager(dbPath: Path) {
 		}
 	}
 
+	fun updateUsername(accountId: UUID, newUsername: String): Boolean {
+		connection().use { conn ->
+			conn.prepareStatement(
+				"UPDATE accounts SET username = ? WHERE id = ?"
+			).use { stmt ->
+				stmt.setString(1, newUsername)
+				stmt.setString(2, accountId.toString())
+				return stmt.executeUpdate() > 0
+			}
+		}
+	}
+
 	// --- Soft-ban operations ---
 
 	fun saveSoftBan(ipAddress: String, expiresAt: Long) {

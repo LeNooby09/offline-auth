@@ -89,6 +89,17 @@ object AdminCommands {
 								.executes { ctx -> deleteUser(ctx, authManager) }
 						)
 				)
+ 			.then(
+					literal("rename")
+						.then(
+							argument("username", string())
+								.suggests(suggestUsernames)
+								.then(
+									argument("new_username", string())
+										.executes { ctx -> renameUser(ctx, authManager) }
+								)
+						)
+				)
 				.then(
 					literal("reload")
 						.executes { ctx -> reloadConfig(ctx, authManager) }
@@ -235,6 +246,47 @@ object AdminCommands {
 			ctx.source.sendFailure(Component.literal("§cFailed to reload config: ${e.message}"))
 			0
 		}
+	}
+
+	private fun renameUser(ctx: CommandContext<CommandSourceStack>, authManager: AuthManager): Int {
+		val username = getString(ctx, "username")
+		val newUsername = getString(ctx, "new_username")
+		val source = ctx.source
+
+		if (newUsername.length !in 3..16) {
+			source.sendFailure(Component.literal("§cUsername must be between 3 and 16 characters."))
+			return 0
+		}
+
+		if (!newUsername.matches(Regex("^[a-zA-Z0-9_]+$"))) {
+			source.sendFailure(Component.literal("§cUsername can only contain letters, numbers, and underscores."))
+			return 0
+		}
+
+		source.sendSuccess({ Component.literal("§7Renaming user...") }, false)
+
+		authManager.runAsync({
+			val account = authManager.database.getAccountByUsername(username)
+				?: return@runAsync "§cUser not found: $username"
+
+			if (authManager.database.getAccountByUsername(newUsername) != null) {
+				return@runAsync "§cUsername already taken: $newUsername"
+			}
+
+			val success = authManager.database.updateUsername(account.id, newUsername)
+			if (success) null else "§cFailed to rename user."
+		}, { errorMsg ->
+			if (errorMsg != null) {
+				source.sendFailure(Component.literal(errorMsg))
+			} else {
+				source.sendSuccess(
+					{ Component.literal("§aRenamed user §e$username §ato §e$newUsername") },
+					false
+				)
+			}
+		})
+
+		return 1
 	}
 
 	private fun revokeCode(ctx: CommandContext<CommandSourceStack>, authManager: AuthManager): Int {
