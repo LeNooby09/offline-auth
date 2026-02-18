@@ -12,6 +12,7 @@
     "GameProfileAccessor",
     "InventoryClickMixin",
     "ItemDropMixin",
+    "JoinMessageMixin",
     "MinecraftServerAccessor",
     "NameTagMixin",
     "PlayerMovementMixin",

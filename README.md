@@ -15,6 +15,7 @@ OfflineAuth requires players to register with an invite code and log in with a p
 - **Automatic OP authentication** — server operators can optionally skip the login step.
 - **Registration rate limiting** — per-IP limits on registration attempts, cooldowns, and maximum accounts per IP.
 - **Login lockout** — exponential backoff after repeated failed login attempts.
+- **Hidden join message** — optionally suppress the "Player joined the game" broadcast until the player authenticates.
 - **Configurable timeouts and bans** — adjustable auth timeout, soft-ban duration, max login attempts, and minimum password length.
 - **Admin commands** — generate and manage invite codes, create/delete/rename accounts, and hot-reload config.
 - **First-boot invite code** — on a fresh install with no accounts, a one-time admin invite code is printed to the server log.
@@ -80,6 +81,7 @@ The configuration file is located at `config/offline-auth/config.yml` and is gen
 | `max-accounts-per-ip` | 3 | Maximum number of accounts that can be registered from a single IP (0 = unlimited). |
 | `login-lockout-base-seconds` | 30 | Base lockout duration in seconds after max failed login attempts (doubles each time). |
 | `login-lockout-max-seconds` | 3600 | Maximum lockout duration in seconds (cap for exponential backoff). |
+| `hide-join-message-until-login` | false | Whether to hide the "Player joined the game" message until the player authenticates. |
 
 ## License
 

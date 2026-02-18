@@ -19,6 +19,7 @@ data class OfflineAuthConfig(
 	val maxAccountsPerIp: Int = 3,
 	val loginLockoutBaseSeconds: Long = 30L,
 	val loginLockoutMaxSeconds: Long = 3600L,
+	val hideJoinMessageUntilLogin: Boolean = false,
 ) {
 
 	companion object {
@@ -40,6 +41,7 @@ data class OfflineAuthConfig(
 			"max-accounts-per-ip" to "# Maximum number of accounts that can be registered from a single IP address (0 = unlimited)",
 			"login-lockout-base-seconds" to "# Base lockout duration in seconds after max failed login attempts (doubles each time)",
 			"login-lockout-max-seconds" to "# Maximum lockout duration in seconds (cap for exponential backoff)",
+			"hide-join-message-until-login" to "# Whether to hide the join message until the player authenticates (default: false)",
 		)
 
 		fun load(configDir: Path): OfflineAuthConfig {
@@ -81,10 +83,14 @@ data class OfflineAuthConfig(
 					maxAccountsPerIp = values["max-accounts-per-ip"]?.toIntOrNull() ?: 3,
 					loginLockoutBaseSeconds = values["login-lockout-base-seconds"]?.toLongOrNull() ?: 30L,
 					loginLockoutMaxSeconds = values["login-lockout-max-seconds"]?.toLongOrNull() ?: 3600L,
+					hideJoinMessageUntilLogin = values["hide-join-message-until-login"]?.toBooleanStrictOrNull() ?: false,
 				)
 			} catch (e: Exception) {
 				OfflineAuth.LOGGER.error("Failed to load config, using defaults", e)
 				OfflineAuthConfig()
+			}.also {
+				// Re-save to add any new config options that didn't exist in the file
+				it.save(configDir)
 			}
 		}
 	}
@@ -108,6 +114,7 @@ data class OfflineAuthConfig(
 			"max-accounts-per-ip" to maxAccountsPerIp.toString(),
 			"login-lockout-base-seconds" to loginLockoutBaseSeconds.toString(),
 			"login-lockout-max-seconds" to loginLockoutMaxSeconds.toString(),
+			"hide-join-message-until-login" to hideJoinMessageUntilLogin.toString(),
 		)
 
 		val builder = StringBuilder()

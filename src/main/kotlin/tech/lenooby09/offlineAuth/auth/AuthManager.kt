@@ -115,6 +115,11 @@ class AuthManager(val database: DatabaseManager, var config: OfflineAuthConfig) 
 			player.sendSystemMessage(Component.empty())
 			player.sendSystemMessage(Component.literal("§aAuto-authenticated as server operator."))
 			player.sendSystemMessage(Component.empty())
+
+			// Broadcast delayed join message for auto-authenticated OPs
+			if (config.hideJoinMessageUntilLogin) {
+				broadcastJoinMessage(player, linkedAccount?.username)
+			}
 			return
 		}
 
@@ -149,6 +154,11 @@ class AuthManager(val database: DatabaseManager, var config: OfflineAuthConfig) 
 				player.sendSystemMessage(Component.empty())
 				player.sendSystemMessage(Component.literal("§aSession restored. Welcome back, §e${linkedAccount.username}§a!"))
 				player.sendSystemMessage(Component.empty())
+
+				// Broadcast delayed join message for session-restored players
+				if (config.hideJoinMessageUntilLogin) {
+					broadcastJoinMessage(player, linkedAccount.username)
+				}
 				return
 			}
 		}
@@ -318,6 +328,11 @@ class AuthManager(val database: DatabaseManager, var config: OfflineAuthConfig) 
 
 		// Store session for "remember me" feature
 		storeSessionForPlayer(player, account)
+
+		// Broadcast delayed join message if configured
+		if (config.hideJoinMessageUntilLogin) {
+			broadcastJoinMessage(player, account.username)
+		}
 	}
 
 	/**
@@ -379,6 +394,13 @@ class AuthManager(val database: DatabaseManager, var config: OfflineAuthConfig) 
 	 * Extracts the IP address from a player connection (public for use in commands).
 	 */
 	fun getPlayerIp(player: ServerPlayer): String? = extractAddress(player)
+
+	private fun broadcastJoinMessage(player: ServerPlayer, accountName: String?) {
+		val displayName = if (accountName != null) Component.literal(accountName) else player.displayName
+		val joinMessage = Component.translatable("multiplayer.player.joined", displayName)
+			.withStyle(net.minecraft.ChatFormatting.YELLOW)
+		server?.playerList?.broadcastSystemMessage(joinMessage, false)
+	}
 
 	fun freezePlayer(player: ServerPlayer) {
 		val pos = spawnPositions[player.uuid] ?: return
