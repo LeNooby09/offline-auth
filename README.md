@@ -6,13 +6,19 @@ OfflineAuth requires players to register with an invite code and log in with a p
 
 ## Features
 
-- **Invite-code registration** -- new players must use a valid invite code to register.
-- **Password authentication** -- registered players log in with a password every session.
-- **Display name override** -- players choose a display name during registration, shown in chat, tab list, and scoreboard.
-- **Automatic OP authentication** -- server operators can optionally skip the login step.
-- **Configurable timeouts and bans** -- adjustable auth timeout, soft-ban duration, max login attempts, and minimum password length.
-- **Admin commands** -- generate and manage invite codes, list accounts, and remove players.
-- **First-boot invite code** -- on a fresh install with no accounts, a one-time admin invite code is printed to the server log.
+- **Invite-code registration** — new players must use a valid invite code to register.
+- **Password authentication** — registered players log in with a password every session.
+- **Display name override** — players choose a display name during registration, shown in chat, tab list, and scoreboard.
+- **Account switching** — players can link multiple Minecraft clients to the same account using `/login_as`.
+- **Change password** — authenticated players can change their password in-game.
+- **Session persistence** — optionally keep players authenticated across reconnects from the same IP.
+- **Automatic OP authentication** — server operators can optionally skip the login step.
+- **Registration rate limiting** — per-IP limits on registration attempts, cooldowns, and maximum accounts per IP.
+- **Login lockout** — exponential backoff after repeated failed login attempts.
+- **Configurable timeouts and bans** — adjustable auth timeout, soft-ban duration, max login attempts, and minimum password length.
+- **Admin commands** — generate and manage invite codes, create/delete/rename accounts, and hot-reload config.
+- **First-boot invite code** — on a fresh install with no accounts, a one-time admin invite code is printed to the server log.
+- **Command aliases** — `/r` for `/register`, `/l` for `/login`, `/ls` for `/login_as`.
 
 ## Requirements
 
@@ -31,19 +37,32 @@ OfflineAuth requires players to register with an invite code and log in with a p
 
 ## Commands
 
+### Player Commands
+
 | Command | Description |
 |---|---|
 | `/register <invite-code> <username> <password>` | Register a new account using an invite code. |
-| `/login <password>` | Log in to an existing account. |
-| `/offlineauth invite generate [uses]` | Generate a new invite code (admin). |
-| `/offlineauth invite list` | List all active invite codes (admin). |
-| `/offlineauth invite revoke <code>` | Revoke an invite code (admin). |
-| `/offlineauth accounts` | List all registered accounts (admin). |
-| `/offlineauth remove <username>` | Remove a registered account (admin). |
+| `/login <password>` | Log in to the account linked to this Minecraft client. |
+| `/login_as <username> <password>` | Log in to an account by username (links the Minecraft client to that account). |
+| `/changepassword <old_password> <new_password>` | Change your password (must be authenticated). |
+
+### Admin Commands
+
+All admin commands require owner-level permissions.
+
+| Command | Description |
+|---|---|
+| `/offlineauth generate [max_uses]` | Generate a new invite code (default: 1 use). |
+| `/offlineauth list` | List all active invite codes. |
+| `/offlineauth revoke <code>` | Revoke an invite code. |
+| `/offlineauth createuser <username> <password>` | Create a new account without an invite code. |
+| `/offlineauth deleteuser <username>` | Delete a registered account. |
+| `/offlineauth rename <username> <new_username>` | Rename a registered account. |
+| `/offlineauth reload` | Hot-reload the configuration file. |
 
 ## Configuration
 
-The configuration file is located at `config/offline-auth/config.yml` and is generated on first startup. Changes require a server restart.
+The configuration file is located at `config/offline-auth/config.yml` and is generated on first startup. Changes can be hot-reloaded with `/offlineauth reload`.
 
 | Option | Default | Description |
 |---|---|---|
@@ -54,6 +73,13 @@ The configuration file is located at `config/offline-auth/config.yml` and is gen
 | `sky-y` | 30000.0 | Y coordinate where unauthenticated players are held. |
 | `auto-auth-ops` | true | Whether server operators are automatically authenticated on join. |
 | `invite-code-length` | 10 | Length of generated invite codes (alphanumeric characters, excluding dashes). |
+| `session-persistence-enabled` | false | Whether players stay authenticated across reconnects from the same IP. |
+| `session-duration-minutes` | 1440 | How long a session persists in minutes (24 hours by default). |
+| `max-register-attempts-per-ip` | 5 | Maximum registration attempts per IP before cooldown kicks in. |
+| `register-cooldown-seconds` | 60 | Cooldown in seconds after max registration attempts from the same IP. |
+| `max-accounts-per-ip` | 3 | Maximum number of accounts that can be registered from a single IP (0 = unlimited). |
+| `login-lockout-base-seconds` | 30 | Base lockout duration in seconds after max failed login attempts (doubles each time). |
+| `login-lockout-max-seconds` | 3600 | Maximum lockout duration in seconds (cap for exponential backoff). |
 
 ## License
 
