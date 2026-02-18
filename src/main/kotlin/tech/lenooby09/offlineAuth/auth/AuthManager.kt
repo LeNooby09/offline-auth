@@ -188,6 +188,12 @@ class AuthManager(val database: DatabaseManager, var config: OfflineAuthConfig) 
 
 		player.teleportTo(player.x, config.skyY, player.z)
 
+		// Hide this unauthenticated player from other players' tab lists
+		hideFromTabList(player)
+
+		// Also hide any other unauthenticated players from this newly joined player's tab list
+		hideOtherUnauthenticatedFromPlayer(player)
+
 		player.sendSystemMessage(Component.empty())
 		player.sendSystemMessage(Component.literal("§7You have §c${config.authTimeoutSeconds} seconds §7to authenticate."))
 		player.sendSystemMessage(Component.literal("§7Use §a/register <invite_code> <username> <password>"))
@@ -281,6 +287,9 @@ class AuthManager(val database: DatabaseManager, var config: OfflineAuthConfig) 
 
 		player.customName = Component.literal(account.username)
 		player.isCustomNameVisible = true
+
+		// Show player in tab list now that they are authenticated
+		showInTabList(player)
 
 		// Swap GameProfile so the nametag above the head shows the auth username
 		updateGameProfileName(player, account.username)
@@ -877,12 +886,39 @@ class AuthManager(val database: DatabaseManager, var config: OfflineAuthConfig) 
 		}
 	}
 
+	private fun hideOtherUnauthenticatedFromPlayer(player: ServerPlayer) {
+		val srv = server ?: return
+		val unauthUuids = srv.playerList.players
+			.filter { it !== player && authStates[it.uuid] != AuthState.AUTHENTICATED }
+			.map { it.uuid }
+		if (unauthUuids.isNotEmpty()) {
+			player.connection.send(ClientboundPlayerInfoRemovePacket(unauthUuids))
+		}
+	}
+
+	private fun hideFromTabList(player: ServerPlayer) {
+		val srv = server ?: return
+		val removePacket = ClientboundPlayerInfoRemovePacket(listOf(player.uuid))
+		for (other in srv.playerList.players) {
+			if (other !== player) {
+				other.connection.send(removePacket)
+			}
+		}
+	}
+
+	private fun showInTabList(player: ServerPlayer) {
+		val srv = server ?: return
+		val addPacket = ClientboundPlayerInfoUpdatePacket.createPlayerInitializing(listOf(player))
+		for (other in srv.playerList.players) {
+			if (other !== player) {
+				other.connection.send(addPacket)
+			}
+		}
+	}
+
 	private fun updateGameProfileName(player: ServerPlayer, newName: String) {
 		val oldProfile = player.gameProfile
-		val newProfile = GameProfile(oldProfile.id, newName)
-		for ((key, value) in oldProfile.properties.entries()) {
-			newProfile.properties.put(key, value)
-		}
+		val newProfile = GameProfile(oldProfile.id, newName, oldProfile.properties)
 		(player as GameProfileAccessor).setGameProfile(newProfile)
 
 		// Resend player info and respawn entity to all clients so the nametag updates
