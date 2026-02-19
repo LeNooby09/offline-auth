@@ -13,6 +13,7 @@
     "InventoryClickMixin",
     "ItemDropMixin",
     "JoinMessageMixin",
+    "LeaveMessageMixin",
     "MinecraftServerAccessor",
     "NameTagMixin",
     "PlayerMovementMixin",

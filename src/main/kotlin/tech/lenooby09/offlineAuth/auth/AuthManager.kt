@@ -180,6 +180,10 @@ class AuthManager(val database: DatabaseManager, var config: OfflineAuthConfig) 
 		player.setInvisible(true)
 		player.setInvulnerable(true)
 
+		// Allow flying so Geyser/Bedrock players don't get kicked for flying while held in the sky
+		player.abilities.mayfly = true
+		player.onUpdateAbilities()
+
 		// Clear inventory while unauthenticated (will be restored on login)
 		player.inventory.clearContent()
 		player.enderChestInventory.clearContent()
@@ -225,6 +229,9 @@ class AuthManager(val database: DatabaseManager, var config: OfflineAuthConfig) 
 		if (!isAuthenticated(player.uuid)) {
 			player.setInvisible(false)
 			player.setInvulnerable(false)
+			// Reset temporary flight permission so playerdata isn't saved with mayfly=true
+			player.abilities.mayfly = false
+			player.abilities.flying = false
 			val pos = spawnPositions[player.uuid]
 			if (pos != null) {
 				val level = resolveDimension(pos.dimension)
@@ -321,14 +328,9 @@ class AuthManager(val database: DatabaseManager, var config: OfflineAuthConfig) 
 		player.customName = Component.literal(account.username)
 		player.isCustomNameVisible = true
 
-		// Show player in tab list now that they are authenticated
-		showInTabList(player)
-
-		// Swap GameProfile so the nametag above the head shows the auth username
-		updateGameProfileName(player, account.username)
-
-		// Teleport player to their saved position BEFORE restoring inventory,
-		// so items don't briefly exist at the sky holding position
+		// Teleport player to their saved position FIRST, before sending any entity/tab
+		// packets, so Geyser/Bedrock players are placed at the correct position when
+		// the entity respawn packets are sent.
 		player.setInvisible(false)
 		val accountPos = database.loadAccountPosition(account.id)
 		if (accountPos != null) {
@@ -353,7 +355,11 @@ class AuthManager(val database: DatabaseManager, var config: OfflineAuthConfig) 
 				if (level != null) {
 					player.teleportTo(level, pos.x, pos.y, pos.z, emptySet(), player.yRot, player.xRot, false)
 				} else {
-					player.teleportTo(pos.x, pos.y, pos.z)
+					player.teleportTo(
+						player.level() as net.minecraft.server.level.ServerLevel,
+						pos.x, pos.y, pos.z,
+						emptySet(), player.yRot, player.xRot, false
+					)
 				}
 			}
 		}
@@ -363,10 +369,22 @@ class AuthManager(val database: DatabaseManager, var config: OfflineAuthConfig) 
 		player.deltaMovement = net.minecraft.world.phys.Vec3.ZERO
 		player.resetFallDistance()
 
+		// Now that the player is at the correct position, send tab list and profile
+		// updates so entity respawn packets contain the ground position
+		showInTabList(player)
+		updateGameProfileName(player, account.username)
+
 		// Restore inventory AFTER teleporting to the correct position
 		loadPlayerInventory(player, account)
 
 		player.setInvulnerable(false)
+
+		// Revoke temporary flight unless player is in creative/spectator
+		if (!player.isCreative && !player.isSpectator) {
+			player.abilities.mayfly = false
+			player.abilities.flying = false
+			player.onUpdateAbilities()
+		}
 
 		// Store session for "remember me" feature
 		storeSessionForPlayer(player, account)
@@ -639,7 +657,15 @@ class AuthManager(val database: DatabaseManager, var config: OfflineAuthConfig) 
 
 	private fun loadPlayerInventory(player: ServerPlayer, account: AuthAccount) {
 		try {
-			val data = database.loadPlayerData(account.id) ?: return
+			val data = database.loadPlayerData(account.id)
+			if (data == null) {
+				// First login — no saved data. Reset XP so Geyser/Bedrock players
+				// don't spawn with stale experience from their Minecraft profile.
+				player.experienceLevel = 0
+				player.experienceProgress = 0f
+				player.totalExperience = 0
+				return
+			}
 			val registryAccess = server!!.registryAccess()
 			val reporter = ProblemReporter.DISCARDING
 
