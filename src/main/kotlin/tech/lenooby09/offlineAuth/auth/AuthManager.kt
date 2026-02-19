@@ -1003,7 +1003,6 @@ class AuthManager(val database: DatabaseManager, var config: OfflineAuthConfig) 
 		val newProfile = GameProfile(oldProfile.id, newName, oldProfile.properties)
 		(player as GameProfileAccessor).setGameProfile(newProfile)
 
-		// Resend player info and respawn entity to all clients so the nametag updates
 		val srv = server ?: return
 		val infoRemovePacket = ClientboundPlayerInfoRemovePacket(listOf(player.uuid))
 		val infoAddPacket = ClientboundPlayerInfoUpdatePacket.createPlayerInitializing(listOf(player))

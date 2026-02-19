@@ -18,7 +18,9 @@ public abstract class TabListDisplayNameMixin {
 		if (OfflineAuth.Companion.getAuthManager() != null) {
 			AuthAccount account = OfflineAuth.Companion.getAuthManager().getAccountMap().get(self.getUUID());
 			if (account != null) {
-				cir.setReturnValue(Component.literal(account.getUsername()));
+				// Return null so the client uses the GameProfile name (already set to the
+				// account name) together with dynamic team prefix/suffix formatting.
+				cir.setReturnValue(null);
 			}
 		}
 	}
