@@ -24,9 +24,10 @@ public abstract class LeaveMessageMixin {
 			)
 	)
 	private void offlineAuth$suppressLeaveMessage(PlayerList instance, Component message, boolean overlay) {
-		if (OfflineAuth.Companion.getAuthManager() != null
-				&& !OfflineAuth.Companion.getAuthManager().isAuthenticated(this.player)) {
-			// Suppress the leave message for unauthenticated players
+		if (OfflineAuth.Companion.getAuthManager() != null) {
+			// Always suppress the vanilla leave message — we broadcast our own
+			// leave message in onPlayerDisconnect / prepareAccountSwitch with
+			// the correct account display name and team formatting.
 			return;
 		}
 		instance.broadcastSystemMessage(message, overlay);

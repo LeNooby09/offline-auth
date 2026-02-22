@@ -214,6 +214,10 @@ class AuthManager(val database: DatabaseManager, var config: OfflineAuthConfig) 
 		// Save inventory and position for authenticated players before disconnect
 		val account = accountMap.remove(player.uuid)
 		if (account != null && isAuthenticated(player.uuid)) {
+			// Broadcast leave message before cleaning up auth state, so it works
+			// regardless of whether removePlayerFromWorld runs before or after this
+			broadcastLeaveMessage(player, account.username)
+
 			saveAccountPosition(player, account)
 			savePlayerInventory(player, account)
 			activeAccountSessions.remove(account.id, player.uuid)
@@ -261,15 +265,17 @@ class AuthManager(val database: DatabaseManager, var config: OfflineAuthConfig) 
 					saveAccountPosition(existingPlayer, account)
 					savePlayerInventory(existingPlayer, account)
 				}
-				authStates.remove(existingPlayerUuid)
-				accountMap.remove(existingPlayerUuid)
-				activeAccountSessions.remove(account.id)
+ 			activeAccountSessions.remove(account.id)
 				cancelKickTimer(existingPlayerUuid)
-				loginAttempts.remove(existingPlayerUuid)
-				spawnPositions.remove(existingPlayerUuid)
 				existingPlayer.connection.disconnect(
 					Component.literal("§cYour account was logged in from another session.")
 				)
+				// Clean up auth state after disconnect so the leave message mixin
+				// still sees the player as authenticated during removePlayerFromWorld
+				authStates.remove(existingPlayerUuid)
+				accountMap.remove(existingPlayerUuid)
+				loginAttempts.remove(existingPlayerUuid)
+				spawnPositions.remove(existingPlayerUuid)
 			}
 		}
 	}
@@ -284,6 +290,9 @@ class AuthManager(val database: DatabaseManager, var config: OfflineAuthConfig) 
 			saveAccountPosition(player, oldAccount)
 			savePlayerInventory(player, oldAccount)
 			activeAccountSessions.remove(oldAccount.id, player.uuid)
+
+			// Broadcast leave message for the old account before switching
+			broadcastLeaveMessage(player, oldAccount.username)
 
 			// De-op so the old account's OP doesn't leak to the new account
 			val srv = server
@@ -456,10 +465,29 @@ class AuthManager(val database: DatabaseManager, var config: OfflineAuthConfig) 
 	fun getPlayerIp(player: ServerPlayer): String? = extractAddress(player)
 
 	private fun broadcastJoinMessage(player: ServerPlayer, accountName: String?) {
-		val displayName = if (accountName != null) Component.literal(accountName) else player.displayName
+		var displayName = if (accountName != null) Component.literal(accountName) else player.displayName
+		if (accountName != null) {
+			val team = player.level().scoreboard.getPlayersTeam(accountName)
+			if (team != null) {
+				displayName = net.minecraft.world.scores.PlayerTeam.formatNameForTeam(team, displayName)
+			}
+		}
 		val joinMessage = Component.translatable("multiplayer.player.joined", displayName)
 			.withStyle(net.minecraft.ChatFormatting.YELLOW)
 		server?.playerList?.broadcastSystemMessage(joinMessage, false)
+	}
+
+	private fun broadcastLeaveMessage(player: ServerPlayer, accountName: String?) {
+		var displayName = if (accountName != null) Component.literal(accountName) else player.displayName
+		if (accountName != null) {
+			val team = player.level().scoreboard.getPlayersTeam(accountName)
+			if (team != null) {
+				displayName = net.minecraft.world.scores.PlayerTeam.formatNameForTeam(team, displayName)
+			}
+		}
+		val leaveMessage = Component.translatable("multiplayer.player.left", displayName)
+			.withStyle(net.minecraft.ChatFormatting.YELLOW)
+		server?.playerList?.broadcastSystemMessage(leaveMessage, false)
 	}
 
 	fun freezePlayer(player: ServerPlayer) {
