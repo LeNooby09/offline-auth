@@ -55,6 +55,7 @@ dependencies {
 	modImplementation("net.fabricmc.fabric-api:fabric-api:${project.property("fabric_version")}")
 
 	implementation("org.xerial:sqlite-jdbc:3.49.1.0")
+	include(implementation("org.postgresql:postgresql:42.7.5")!!)
 	include(implementation("com.zaxxer:HikariCP:6.2.1")!!)
 	include("org.slf4j:slf4j-api:2.0.16")
 	include(implementation("at.favre.lib:bcrypt:0.10.2")!!)
@@ -82,7 +83,7 @@ dependencies {
 tasks.jar {
 	from({
 		configurations.runtimeClasspath.get()
-			.filter { it.name.contains("sqlite-jdbc") }
+			.filter { it.name.contains("sqlite-jdbc") || it.name.contains("postgresql") }
 			.map { zipTree(it) }
 	}) {
 		exclude("META-INF/MANIFEST.MF")

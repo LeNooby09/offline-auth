@@ -3,15 +3,22 @@ package tech.lenooby09.offlineAuth.storage
 import com.zaxxer.hikari.HikariConfig
 import com.zaxxer.hikari.HikariDataSource
 import tech.lenooby09.offlineAuth.auth.AuthAccount
+import tech.lenooby09.offlineAuth.config.OfflineAuthConfig
 import java.nio.file.Path
 import java.sql.Connection
 import java.util.*
 
-class DatabaseManager(dbPath: Path) {
+enum class DatabaseType {
+	SQLITE, POSTGRESQL
+}
+
+class DatabaseManager {
 
 	private val dataSource: HikariDataSource
+	private val dbType: DatabaseType
 
-	init {
+	constructor(dbPath: Path) {
+		dbType = DatabaseType.SQLITE
 		Class.forName("org.sqlite.JDBC")
 		val hikariConfig = HikariConfig().apply {
 			jdbcUrl = "jdbc:sqlite:${dbPath.toAbsolutePath()}"
@@ -20,12 +27,10 @@ class DatabaseManager(dbPath: Path) {
 			connectionTimeout = 5000
 			idleTimeout = 60000
 			maxLifetime = 300000
-			// SQLite requires serialized access for writes; WAL mode helps with concurrent reads
 			addDataSourceProperty("journal_mode", "WAL")
 		}
 		dataSource = HikariDataSource(hikariConfig)
 
-		// Enable WAL mode for better concurrent access
 		connection().use { conn ->
 			conn.createStatement().use { it.execute("PRAGMA journal_mode=WAL") }
 		}
@@ -34,7 +39,43 @@ class DatabaseManager(dbPath: Path) {
 		migrateSchema()
 	}
 
+	constructor(config: OfflineAuthConfig) {
+		dbType = DatabaseType.POSTGRESQL
+		Class.forName("org.postgresql.Driver")
+		val hikariConfig = HikariConfig().apply {
+			jdbcUrl = "jdbc:postgresql://${config.postgresHost}:${config.postgresPort}/${config.postgresDatabase}"
+			username = config.postgresUser
+			password = config.postgresPassword
+			maximumPoolSize = 10
+			minimumIdle = 2
+			connectionTimeout = 5000
+			idleTimeout = 60000
+			maxLifetime = 300000
+		}
+		dataSource = HikariDataSource(hikariConfig)
+
+		createTables()
+		migrateSchema()
+	}
+
 	private fun connection(): Connection = dataSource.connection
+
+	private val blobType get() = if (dbType == DatabaseType.SQLITE) "BLOB" else "BYTEA"
+
+	private fun upsertSql(table: String, conflictCol: String, columns: List<String>, updateColumns: List<String>): String {
+		val cols = columns.joinToString(", ")
+		val placeholders = columns.joinToString(", ") { "?" }
+		val updateSet = updateColumns.joinToString(", ") { "$it = EXCLUDED.$it" }
+		return "INSERT INTO $table ($cols) VALUES ($placeholders) ON CONFLICT($conflictCol) DO UPDATE SET $updateSet"
+	}
+
+	private fun upsertSql(table: String, conflictCols: List<String>, columns: List<String>, updateColumns: List<String>): String {
+		val cols = columns.joinToString(", ")
+		val placeholders = columns.joinToString(", ") { "?" }
+		val conflict = conflictCols.joinToString(", ")
+		val updateSet = updateColumns.joinToString(", ") { "$it = EXCLUDED.$it" }
+		return "INSERT INTO $table ($cols) VALUES ($placeholders) ON CONFLICT($conflict) DO UPDATE SET $updateSet"
+	}
 
 	private fun createTables() {
 		connection().use { conn ->
@@ -45,7 +86,7 @@ class DatabaseManager(dbPath: Path) {
                     id TEXT PRIMARY KEY,
                     username TEXT NOT NULL UNIQUE,
                     password_hash TEXT NOT NULL,
-                    registered_at INTEGER NOT NULL,
+                    registered_at BIGINT NOT NULL,
                     is_dashboard_admin INTEGER NOT NULL DEFAULT 0
                 )
                 """.trimIndent()
@@ -56,7 +97,7 @@ class DatabaseManager(dbPath: Path) {
                 CREATE TABLE IF NOT EXISTS invite_codes (
                     code TEXT PRIMARY KEY,
                     created_by TEXT NOT NULL,
-                    created_at INTEGER NOT NULL,
+                    created_at BIGINT NOT NULL,
                     max_uses INTEGER NOT NULL DEFAULT 1,
                     current_uses INTEGER NOT NULL DEFAULT 0
                 )
@@ -68,7 +109,7 @@ class DatabaseManager(dbPath: Path) {
                 CREATE TABLE IF NOT EXISTS invite_code_uses (
                     code TEXT NOT NULL,
                     used_by TEXT NOT NULL,
-                    used_at INTEGER NOT NULL,
+                    used_at BIGINT NOT NULL,
                     FOREIGN KEY (code) REFERENCES invite_codes(code)
                 )
                 """.trimIndent()
@@ -89,9 +130,9 @@ class DatabaseManager(dbPath: Path) {
 					"""
                 CREATE TABLE IF NOT EXISTS player_data (
                     account_id TEXT PRIMARY KEY,
-                    inventory_data BLOB,
-                    ender_chest_data BLOB,
-                    equipment_data BLOB,
+                    inventory_data $blobType,
+                    ender_chest_data $blobType,
+                    equipment_data $blobType,
                     exp INTEGER NOT NULL DEFAULT 0,
                     exp_level INTEGER NOT NULL DEFAULT 0,
                     exp_progress REAL NOT NULL DEFAULT 0.0,
@@ -100,12 +141,12 @@ class DatabaseManager(dbPath: Path) {
                     saturation REAL NOT NULL DEFAULT 5.0,
                     game_mode TEXT NOT NULL DEFAULT 'SURVIVAL',
                     selected_slot INTEGER NOT NULL DEFAULT 0,
-                    effects_data BLOB,
+                    effects_data $blobType,
                     is_flying INTEGER NOT NULL DEFAULT 0,
-                    respawn_data BLOB,
-                    recipes_data BLOB,
-                    advancements_data BLOB,
-                    stats_data BLOB,
+                    respawn_data $blobType,
+                    recipes_data $blobType,
+                    advancements_data $blobType,
+                    stats_data $blobType,
                     food_exhaustion REAL NOT NULL DEFAULT 0.0,
                     food_tick_timer INTEGER NOT NULL DEFAULT 0,
                     score INTEGER NOT NULL DEFAULT 0,
@@ -113,7 +154,7 @@ class DatabaseManager(dbPath: Path) {
                     air_supply INTEGER NOT NULL DEFAULT 300,
                     is_op INTEGER NOT NULL DEFAULT 0,
                     op_level INTEGER NOT NULL DEFAULT 0,
-                    updated_at INTEGER NOT NULL,
+                    updated_at BIGINT NOT NULL,
                     FOREIGN KEY (account_id) REFERENCES accounts(id)
                 )
                 """.trimIndent()
@@ -123,9 +164,9 @@ class DatabaseManager(dbPath: Path) {
 					"""
                 CREATE TABLE IF NOT EXISTS spawn_positions (
                     minecraft_uuid TEXT PRIMARY KEY,
-                    x REAL NOT NULL,
-                    y REAL NOT NULL,
-                    z REAL NOT NULL,
+                    x DOUBLE PRECISION NOT NULL,
+                    y DOUBLE PRECISION NOT NULL,
+                    z DOUBLE PRECISION NOT NULL,
                     dimension TEXT NOT NULL DEFAULT 'minecraft:overworld'
                 )
                 """.trimIndent()
@@ -135,9 +176,9 @@ class DatabaseManager(dbPath: Path) {
 					"""
                 CREATE TABLE IF NOT EXISTS account_positions (
                     account_id TEXT PRIMARY KEY,
-                    x REAL NOT NULL,
-                    y REAL NOT NULL,
-                    z REAL NOT NULL,
+                    x DOUBLE PRECISION NOT NULL,
+                    y DOUBLE PRECISION NOT NULL,
+                    z DOUBLE PRECISION NOT NULL,
                     yaw REAL NOT NULL DEFAULT 0,
                     pitch REAL NOT NULL DEFAULT 0,
                     dimension TEXT NOT NULL DEFAULT 'minecraft:overworld',
@@ -151,7 +192,7 @@ class DatabaseManager(dbPath: Path) {
                 CREATE TABLE IF NOT EXISTS registration_ips (
                     account_id TEXT NOT NULL,
                     ip_address TEXT NOT NULL,
-                    registered_at INTEGER NOT NULL,
+                    registered_at BIGINT NOT NULL,
                     PRIMARY KEY (account_id),
                     FOREIGN KEY (account_id) REFERENCES accounts(id)
                 )
@@ -163,7 +204,7 @@ class DatabaseManager(dbPath: Path) {
                 CREATE TABLE IF NOT EXISTS auth_sessions (
                     account_id TEXT NOT NULL,
                     ip_address TEXT NOT NULL,
-                    expires_at INTEGER NOT NULL,
+                    expires_at BIGINT NOT NULL,
                     PRIMARY KEY (account_id, ip_address),
                     FOREIGN KEY (account_id) REFERENCES accounts(id)
                 )
@@ -175,8 +216,8 @@ class DatabaseManager(dbPath: Path) {
                 CREATE TABLE IF NOT EXISTS login_attempts (
                     account_id TEXT PRIMARY KEY,
                     failed_count INTEGER NOT NULL DEFAULT 0,
-                    last_failed_at INTEGER NOT NULL DEFAULT 0,
-                    locked_until INTEGER NOT NULL DEFAULT 0,
+                    last_failed_at BIGINT NOT NULL DEFAULT 0,
+                    locked_until BIGINT NOT NULL DEFAULT 0,
                     FOREIGN KEY (account_id) REFERENCES accounts(id)
                 )
                 """.trimIndent()
@@ -186,7 +227,7 @@ class DatabaseManager(dbPath: Path) {
 					"""
                 CREATE TABLE IF NOT EXISTS soft_bans (
                     ip_address TEXT PRIMARY KEY,
-                    expires_at INTEGER NOT NULL
+                    expires_at BIGINT NOT NULL
                 )
                 """.trimIndent()
 				)
@@ -194,186 +235,82 @@ class DatabaseManager(dbPath: Path) {
 		}
 	}
 
-	private fun migrateSchema() {
-		connection().use { conn ->
-			// Migrate account_positions
-			val apColumns = mutableSetOf<String>()
+	private fun getTableColumns(conn: Connection, tableName: String): Set<String> {
+		val columns = mutableSetOf<String>()
+		if (dbType == DatabaseType.SQLITE) {
 			conn.createStatement().use { stmt ->
-				val rs = stmt.executeQuery("PRAGMA table_info(account_positions)")
+				val rs = stmt.executeQuery("PRAGMA table_info($tableName)")
 				while (rs.next()) {
-					apColumns.add(rs.getString("name"))
+					columns.add(rs.getString("name"))
 				}
 			}
-			if (apColumns.isNotEmpty()) {
-				if ("yaw" !in apColumns) {
-					conn.createStatement().use { stmt ->
-						stmt.executeUpdate("ALTER TABLE account_positions ADD COLUMN yaw REAL NOT NULL DEFAULT 0")
-					}
-				}
-				if ("pitch" !in apColumns) {
-					conn.createStatement().use { stmt ->
-						stmt.executeUpdate("ALTER TABLE account_positions ADD COLUMN pitch REAL NOT NULL DEFAULT 0")
-					}
-				}
-				if ("dimension" !in apColumns) {
-					conn.createStatement().use { stmt ->
-						stmt.executeUpdate("ALTER TABLE account_positions ADD COLUMN dimension TEXT NOT NULL DEFAULT 'minecraft:overworld'")
-					}
+		} else {
+			conn.prepareStatement(
+				"SELECT column_name FROM information_schema.columns WHERE table_name = ?"
+			).use { stmt ->
+				stmt.setString(1, tableName)
+				val rs = stmt.executeQuery()
+				while (rs.next()) {
+					columns.add(rs.getString("column_name"))
 				}
 			}
+		}
+		return columns
+	}
 
-			// Migrate spawn_positions
-			val spColumns = mutableSetOf<String>()
+	private fun addColumnIfMissing(conn: Connection, table: String, column: String, definition: String, columns: Set<String>) {
+		if (columns.isNotEmpty() && column !in columns) {
 			conn.createStatement().use { stmt ->
-				val rs = stmt.executeQuery("PRAGMA table_info(spawn_positions)")
-				while (rs.next()) {
-					spColumns.add(rs.getString("name"))
-				}
-			}
-			if (spColumns.isNotEmpty()) {
-				if ("dimension" !in spColumns) {
-					conn.createStatement().use { stmt ->
-						stmt.executeUpdate("ALTER TABLE spawn_positions ADD COLUMN dimension TEXT NOT NULL DEFAULT 'minecraft:overworld'")
-					}
-				}
-			}
-
-			migratePlayerDataSchema(conn)
-
-			// Migrate accounts table
-			val accColumns = mutableSetOf<String>()
-			conn.createStatement().use { stmt ->
-				val rs = stmt.executeQuery("PRAGMA table_info(accounts)")
-				while (rs.next()) {
-					accColumns.add(rs.getString("name"))
-				}
-			}
-			if (accColumns.isNotEmpty() && "is_dashboard_admin" !in accColumns) {
-				conn.createStatement().use { stmt ->
-					stmt.executeUpdate("ALTER TABLE accounts ADD COLUMN is_dashboard_admin INTEGER NOT NULL DEFAULT 0")
-				}
+				stmt.executeUpdate("ALTER TABLE $table ADD COLUMN $column $definition")
 			}
 		}
 	}
 
+	private fun migrateSchema() {
+		connection().use { conn ->
+			// Migrate account_positions
+			val apColumns = getTableColumns(conn, "account_positions")
+			addColumnIfMissing(conn, "account_positions", "yaw", "REAL NOT NULL DEFAULT 0", apColumns)
+			addColumnIfMissing(conn, "account_positions", "pitch", "REAL NOT NULL DEFAULT 0", apColumns)
+			addColumnIfMissing(conn, "account_positions", "dimension", "TEXT NOT NULL DEFAULT 'minecraft:overworld'", apColumns)
+
+			// Migrate spawn_positions
+			val spColumns = getTableColumns(conn, "spawn_positions")
+			addColumnIfMissing(conn, "spawn_positions", "dimension", "TEXT NOT NULL DEFAULT 'minecraft:overworld'", spColumns)
+
+			migratePlayerDataSchema(conn)
+
+			// Migrate accounts table
+			val accColumns = getTableColumns(conn, "accounts")
+			addColumnIfMissing(conn, "accounts", "is_dashboard_admin", "INTEGER NOT NULL DEFAULT 0", accColumns)
+		}
+	}
+
 	private fun migratePlayerDataSchema(conn: Connection) {
-		val pdColumns = mutableSetOf<String>()
-		conn.createStatement().use { stmt ->
-			val rs = stmt.executeQuery("PRAGMA table_info(player_data)")
-			while (rs.next()) {
-				pdColumns.add(rs.getString("name"))
-			}
-		}
-		if (pdColumns.isNotEmpty() && "equipment_data" !in pdColumns) {
-			conn.createStatement().use { stmt ->
-				stmt.executeUpdate("ALTER TABLE player_data ADD COLUMN equipment_data BLOB")
-			}
-		}
-		if (pdColumns.isNotEmpty() && "exp" !in pdColumns) {
-			conn.createStatement().use { stmt ->
-				stmt.executeUpdate("ALTER TABLE player_data ADD COLUMN exp INTEGER NOT NULL DEFAULT 0")
-			}
-		}
-		if (pdColumns.isNotEmpty() && "exp_level" !in pdColumns) {
-			conn.createStatement().use { stmt ->
-				stmt.executeUpdate("ALTER TABLE player_data ADD COLUMN exp_level INTEGER NOT NULL DEFAULT 0")
-			}
-		}
-		if (pdColumns.isNotEmpty() && "exp_progress" !in pdColumns) {
-			conn.createStatement().use { stmt ->
-				stmt.executeUpdate("ALTER TABLE player_data ADD COLUMN exp_progress REAL NOT NULL DEFAULT 0.0")
-			}
-		}
-		if (pdColumns.isNotEmpty() && "health" !in pdColumns) {
-			conn.createStatement().use { stmt ->
-				stmt.executeUpdate("ALTER TABLE player_data ADD COLUMN health REAL NOT NULL DEFAULT 20.0")
-			}
-		}
-		if (pdColumns.isNotEmpty() && "food_level" !in pdColumns) {
-			conn.createStatement().use { stmt ->
-				stmt.executeUpdate("ALTER TABLE player_data ADD COLUMN food_level INTEGER NOT NULL DEFAULT 20")
-			}
-		}
-		if (pdColumns.isNotEmpty() && "saturation" !in pdColumns) {
-			conn.createStatement().use { stmt ->
-				stmt.executeUpdate("ALTER TABLE player_data ADD COLUMN saturation REAL NOT NULL DEFAULT 5.0")
-			}
-		}
-		if (pdColumns.isNotEmpty() && "game_mode" !in pdColumns) {
-			conn.createStatement().use { stmt ->
-				stmt.executeUpdate("ALTER TABLE player_data ADD COLUMN game_mode TEXT NOT NULL DEFAULT 'SURVIVAL'")
-			}
-		}
-		if (pdColumns.isNotEmpty() && "selected_slot" !in pdColumns) {
-			conn.createStatement().use { stmt ->
-				stmt.executeUpdate("ALTER TABLE player_data ADD COLUMN selected_slot INTEGER NOT NULL DEFAULT 0")
-			}
-		}
-		if (pdColumns.isNotEmpty() && "effects_data" !in pdColumns) {
-			conn.createStatement().use { stmt ->
-				stmt.executeUpdate("ALTER TABLE player_data ADD COLUMN effects_data BLOB")
-			}
-		}
- 	if (pdColumns.isNotEmpty() && "is_flying" !in pdColumns) {
-			conn.createStatement().use { stmt ->
-				stmt.executeUpdate("ALTER TABLE player_data ADD COLUMN is_flying INTEGER NOT NULL DEFAULT 0")
-			}
-		}
-		if (pdColumns.isNotEmpty() && "respawn_data" !in pdColumns) {
-			conn.createStatement().use { stmt ->
-				stmt.executeUpdate("ALTER TABLE player_data ADD COLUMN respawn_data BLOB")
-			}
-		}
-		if (pdColumns.isNotEmpty() && "recipes_data" !in pdColumns) {
-			conn.createStatement().use { stmt ->
-				stmt.executeUpdate("ALTER TABLE player_data ADD COLUMN recipes_data BLOB")
-			}
-		}
-		if (pdColumns.isNotEmpty() && "advancements_data" !in pdColumns) {
-			conn.createStatement().use { stmt ->
-				stmt.executeUpdate("ALTER TABLE player_data ADD COLUMN advancements_data BLOB")
-			}
-		}
-		if (pdColumns.isNotEmpty() && "stats_data" !in pdColumns) {
-			conn.createStatement().use { stmt ->
-				stmt.executeUpdate("ALTER TABLE player_data ADD COLUMN stats_data BLOB")
-			}
-		}
-		if (pdColumns.isNotEmpty() && "food_exhaustion" !in pdColumns) {
-			conn.createStatement().use { stmt ->
-				stmt.executeUpdate("ALTER TABLE player_data ADD COLUMN food_exhaustion REAL NOT NULL DEFAULT 0.0")
-			}
-		}
-		if (pdColumns.isNotEmpty() && "food_tick_timer" !in pdColumns) {
-			conn.createStatement().use { stmt ->
-				stmt.executeUpdate("ALTER TABLE player_data ADD COLUMN food_tick_timer INTEGER NOT NULL DEFAULT 0")
-			}
-		}
-		if (pdColumns.isNotEmpty() && "score" !in pdColumns) {
-			conn.createStatement().use { stmt ->
-				stmt.executeUpdate("ALTER TABLE player_data ADD COLUMN score INTEGER NOT NULL DEFAULT 0")
-			}
-		}
-		if (pdColumns.isNotEmpty() && "fire_ticks" !in pdColumns) {
-			conn.createStatement().use { stmt ->
-				stmt.executeUpdate("ALTER TABLE player_data ADD COLUMN fire_ticks INTEGER NOT NULL DEFAULT 0")
-			}
-		}
-		if (pdColumns.isNotEmpty() && "air_supply" !in pdColumns) {
-			conn.createStatement().use { stmt ->
-				stmt.executeUpdate("ALTER TABLE player_data ADD COLUMN air_supply INTEGER NOT NULL DEFAULT 300")
-			}
-		}
-		if (pdColumns.isNotEmpty() && "is_op" !in pdColumns) {
-			conn.createStatement().use { stmt ->
-				stmt.executeUpdate("ALTER TABLE player_data ADD COLUMN is_op INTEGER NOT NULL DEFAULT 0")
-			}
-		}
-		if (pdColumns.isNotEmpty() && "op_level" !in pdColumns) {
-			conn.createStatement().use { stmt ->
-				stmt.executeUpdate("ALTER TABLE player_data ADD COLUMN op_level INTEGER NOT NULL DEFAULT 0")
-			}
-		}
+		val pdColumns = getTableColumns(conn, "player_data")
+		val bt = blobType
+		addColumnIfMissing(conn, "player_data", "equipment_data", bt, pdColumns)
+		addColumnIfMissing(conn, "player_data", "exp", "INTEGER NOT NULL DEFAULT 0", pdColumns)
+		addColumnIfMissing(conn, "player_data", "exp_level", "INTEGER NOT NULL DEFAULT 0", pdColumns)
+		addColumnIfMissing(conn, "player_data", "exp_progress", "REAL NOT NULL DEFAULT 0.0", pdColumns)
+		addColumnIfMissing(conn, "player_data", "health", "REAL NOT NULL DEFAULT 20.0", pdColumns)
+		addColumnIfMissing(conn, "player_data", "food_level", "INTEGER NOT NULL DEFAULT 20", pdColumns)
+		addColumnIfMissing(conn, "player_data", "saturation", "REAL NOT NULL DEFAULT 5.0", pdColumns)
+		addColumnIfMissing(conn, "player_data", "game_mode", "TEXT NOT NULL DEFAULT 'SURVIVAL'", pdColumns)
+		addColumnIfMissing(conn, "player_data", "selected_slot", "INTEGER NOT NULL DEFAULT 0", pdColumns)
+		addColumnIfMissing(conn, "player_data", "effects_data", bt, pdColumns)
+		addColumnIfMissing(conn, "player_data", "is_flying", "INTEGER NOT NULL DEFAULT 0", pdColumns)
+		addColumnIfMissing(conn, "player_data", "respawn_data", bt, pdColumns)
+		addColumnIfMissing(conn, "player_data", "recipes_data", bt, pdColumns)
+		addColumnIfMissing(conn, "player_data", "advancements_data", bt, pdColumns)
+		addColumnIfMissing(conn, "player_data", "stats_data", bt, pdColumns)
+		addColumnIfMissing(conn, "player_data", "food_exhaustion", "REAL NOT NULL DEFAULT 0.0", pdColumns)
+		addColumnIfMissing(conn, "player_data", "food_tick_timer", "INTEGER NOT NULL DEFAULT 0", pdColumns)
+		addColumnIfMissing(conn, "player_data", "score", "INTEGER NOT NULL DEFAULT 0", pdColumns)
+		addColumnIfMissing(conn, "player_data", "fire_ticks", "INTEGER NOT NULL DEFAULT 0", pdColumns)
+		addColumnIfMissing(conn, "player_data", "air_supply", "INTEGER NOT NULL DEFAULT 300", pdColumns)
+		addColumnIfMissing(conn, "player_data", "is_op", "INTEGER NOT NULL DEFAULT 0", pdColumns)
+		addColumnIfMissing(conn, "player_data", "op_level", "INTEGER NOT NULL DEFAULT 0", pdColumns)
 	}
 
 	// --- Account operations ---
@@ -443,7 +380,9 @@ class DatabaseManager(dbPath: Path) {
 	fun linkMinecraftAccount(minecraftUuid: UUID, accountId: UUID) {
 		connection().use { conn ->
 			conn.prepareStatement(
-				"INSERT OR REPLACE INTO account_links (minecraft_uuid, account_id) VALUES (?, ?)"
+				upsertSql("account_links", "minecraft_uuid",
+					listOf("minecraft_uuid", "account_id"),
+					listOf("account_id"))
 			).use { stmt ->
 				stmt.setString(1, minecraftUuid.toString())
 				stmt.setString(2, accountId.toString())
@@ -578,9 +517,11 @@ class DatabaseManager(dbPath: Path) {
 		isOp: Boolean,
 		opLevel: Int,
 	) {
+		val allCols = listOf("account_id", "inventory_data", "ender_chest_data", "equipment_data", "exp", "exp_level", "exp_progress", "health", "food_level", "saturation", "game_mode", "selected_slot", "effects_data", "is_flying", "respawn_data", "recipes_data", "advancements_data", "stats_data", "food_exhaustion", "food_tick_timer", "score", "fire_ticks", "air_supply", "is_op", "op_level", "updated_at")
+		val updateCols = allCols.filter { it != "account_id" }
 		connection().use { conn ->
 			conn.prepareStatement(
-				"INSERT OR REPLACE INTO player_data (account_id, inventory_data, ender_chest_data, equipment_data, exp, exp_level, exp_progress, health, food_level, saturation, game_mode, selected_slot, effects_data, is_flying, respawn_data, recipes_data, advancements_data, stats_data, food_exhaustion, food_tick_timer, score, fire_ticks, air_supply, is_op, op_level, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+				upsertSql("player_data", "account_id", allCols, updateCols)
 			).use { stmt ->
 				stmt.setString(1, accountId.toString())
 				stmt.setBytes(2, inventoryData)
@@ -716,22 +657,16 @@ class DatabaseManager(dbPath: Path) {
 
 	fun setAccountOp(accountId: UUID, isOp: Boolean, opLevel: Int) {
 		connection().use { conn ->
-			// Use upsert: if no player_data row exists yet, create one with OP fields set
 			conn.prepareStatement(
-				"""
-				INSERT INTO player_data (account_id, is_op, op_level, updated_at)
-				VALUES (?, ?, ?, ?)
-				ON CONFLICT(account_id) DO UPDATE SET is_op = ?, op_level = ?, updated_at = ?
-				""".trimIndent()
+				upsertSql("player_data", "account_id",
+					listOf("account_id", "is_op", "op_level", "updated_at"),
+					listOf("is_op", "op_level", "updated_at"))
 			).use { stmt ->
 				val now = System.currentTimeMillis()
 				stmt.setString(1, accountId.toString())
 				stmt.setInt(2, if (isOp) 1 else 0)
 				stmt.setInt(3, opLevel)
 				stmt.setLong(4, now)
-				stmt.setInt(5, if (isOp) 1 else 0)
-				stmt.setInt(6, opLevel)
-				stmt.setLong(7, now)
 				stmt.executeUpdate()
 			}
 		}
@@ -765,7 +700,9 @@ class DatabaseManager(dbPath: Path) {
 	fun saveSpawnPosition(minecraftUuid: UUID, x: Double, y: Double, z: Double, dimension: String) {
 		connection().use { conn ->
 			conn.prepareStatement(
-				"INSERT OR REPLACE INTO spawn_positions (minecraft_uuid, x, y, z, dimension) VALUES (?, ?, ?, ?, ?)"
+				upsertSql("spawn_positions", "minecraft_uuid",
+					listOf("minecraft_uuid", "x", "y", "z", "dimension"),
+					listOf("x", "y", "z", "dimension"))
 			).use { stmt ->
 				stmt.setString(1, minecraftUuid.toString())
 				stmt.setDouble(2, x)
@@ -811,7 +748,9 @@ class DatabaseManager(dbPath: Path) {
 	fun saveAccountPosition(accountId: UUID, x: Double, y: Double, z: Double, yaw: Float, pitch: Float, dimension: String) {
 		connection().use { conn ->
 			conn.prepareStatement(
-				"INSERT OR REPLACE INTO account_positions (account_id, x, y, z, yaw, pitch, dimension) VALUES (?, ?, ?, ?, ?, ?, ?)"
+				upsertSql("account_positions", "account_id",
+					listOf("account_id", "x", "y", "z", "yaw", "pitch", "dimension"),
+					listOf("x", "y", "z", "yaw", "pitch", "dimension"))
 			).use { stmt ->
 				stmt.setString(1, accountId.toString())
 				stmt.setDouble(2, x)
@@ -862,7 +801,9 @@ class DatabaseManager(dbPath: Path) {
 	fun saveSession(accountId: UUID, ipAddress: String, expiresAt: Long) {
 		connection().use { conn ->
 			conn.prepareStatement(
-				"INSERT OR REPLACE INTO auth_sessions (account_id, ip_address, expires_at) VALUES (?, ?, ?)"
+				upsertSql("auth_sessions", listOf("account_id", "ip_address"),
+					listOf("account_id", "ip_address", "expires_at"),
+					listOf("expires_at"))
 			).use { stmt ->
 				stmt.setString(1, accountId.toString())
 				stmt.setString(2, ipAddress)
@@ -915,7 +856,9 @@ class DatabaseManager(dbPath: Path) {
 	fun saveRegistrationIp(accountId: UUID, ipAddress: String) {
 		connection().use { conn ->
 			conn.prepareStatement(
-				"INSERT OR REPLACE INTO registration_ips (account_id, ip_address, registered_at) VALUES (?, ?, ?)"
+				upsertSql("registration_ips", "account_id",
+					listOf("account_id", "ip_address", "registered_at"),
+					listOf("ip_address", "registered_at"))
 			).use { stmt ->
 				stmt.setString(1, accountId.toString())
 				stmt.setString(2, ipAddress)
@@ -973,9 +916,9 @@ class DatabaseManager(dbPath: Path) {
 				INSERT INTO login_attempts (account_id, failed_count, last_failed_at, locked_until)
 				VALUES (?, 1, ?, ?)
 				ON CONFLICT(account_id) DO UPDATE SET
-					failed_count = failed_count + 1,
-					last_failed_at = excluded.last_failed_at,
-					locked_until = excluded.locked_until
+					failed_count = login_attempts.failed_count + 1,
+					last_failed_at = EXCLUDED.last_failed_at,
+					locked_until = EXCLUDED.locked_until
 				""".trimIndent()
 			).use { stmt ->
 				stmt.setString(1, accountId.toString())
@@ -1038,7 +981,9 @@ class DatabaseManager(dbPath: Path) {
 	fun saveSoftBan(ipAddress: String, expiresAt: Long) {
 		connection().use { conn ->
 			conn.prepareStatement(
-				"INSERT OR REPLACE INTO soft_bans (ip_address, expires_at) VALUES (?, ?)"
+				upsertSql("soft_bans", "ip_address",
+					listOf("ip_address", "expires_at"),
+					listOf("expires_at"))
 			).use { stmt ->
 				stmt.setString(1, ipAddress)
 				stmt.setLong(2, expiresAt)

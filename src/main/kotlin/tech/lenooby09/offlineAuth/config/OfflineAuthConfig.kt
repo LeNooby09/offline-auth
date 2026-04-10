@@ -23,6 +23,12 @@ data class OfflineAuthConfig(
 	val webDashboardEnabled: Boolean = false,
 	val webDashboardPort: Int = 8080,
 	val webDashboardBindAddress: String = "127.0.0.1",
+	val databaseType: String = "sqlite",
+	val postgresHost: String = "localhost",
+	val postgresPort: Int = 5432,
+	val postgresDatabase: String = "offlineauth",
+	val postgresUser: String = "offlineauth",
+	val postgresPassword: String = "",
 ) {
 
 	companion object {
@@ -48,6 +54,12 @@ data class OfflineAuthConfig(
 			"web-dashboard-enabled" to "# Whether to enable the embedded web dashboard for account management",
 			"web-dashboard-port" to "# Port for the web dashboard HTTP server",
 			"web-dashboard-bind-address" to "# Bind address for the web dashboard (127.0.0.1 = localhost only, 0.0.0.0 = all interfaces)",
+			"database-type" to "# Database backend to use: 'sqlite' (local file) or 'postgresql' (remote server for multi-server setups)",
+			"postgres-host" to "# PostgreSQL server hostname (only used when database-type is 'postgresql')",
+			"postgres-port" to "# PostgreSQL server port",
+			"postgres-database" to "# PostgreSQL database name",
+			"postgres-user" to "# PostgreSQL username",
+			"postgres-password" to "# PostgreSQL password",
 		)
 
 		fun load(configDir: Path): OfflineAuthConfig {
@@ -93,6 +105,12 @@ data class OfflineAuthConfig(
 					webDashboardEnabled = values["web-dashboard-enabled"]?.toBooleanStrictOrNull() ?: false,
 					webDashboardPort = values["web-dashboard-port"]?.toIntOrNull() ?: 8080,
 					webDashboardBindAddress = values["web-dashboard-bind-address"] ?: "127.0.0.1",
+					databaseType = values["database-type"] ?: "sqlite",
+					postgresHost = values["postgres-host"] ?: "localhost",
+					postgresPort = values["postgres-port"]?.toIntOrNull() ?: 5432,
+					postgresDatabase = values["postgres-database"] ?: "offlineauth",
+					postgresUser = values["postgres-user"] ?: "offlineauth",
+					postgresPassword = values["postgres-password"] ?: "",
 				)
 			} catch (e: Exception) {
 				OfflineAuth.LOGGER.error("Failed to load config, using defaults", e)
@@ -127,6 +145,12 @@ data class OfflineAuthConfig(
 			"web-dashboard-enabled" to webDashboardEnabled.toString(),
 			"web-dashboard-port" to webDashboardPort.toString(),
 			"web-dashboard-bind-address" to webDashboardBindAddress,
+			"database-type" to databaseType,
+			"postgres-host" to postgresHost,
+			"postgres-port" to postgresPort.toString(),
+			"postgres-database" to postgresDatabase,
+			"postgres-user" to postgresUser,
+			"postgres-password" to postgresPassword,
 		)
 
 		val builder = StringBuilder()

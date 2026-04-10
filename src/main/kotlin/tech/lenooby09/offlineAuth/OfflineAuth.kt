@@ -46,10 +46,16 @@ class OfflineAuth : ModInitializer {
 		configDir = cfgDir
 
 		config = OfflineAuthConfig.load(cfgDir)
-		LOGGER.info("Config loaded: authTimeout=${config.authTimeoutSeconds}s, softBan=${config.softBanMinutes}min, maxAttempts=${config.maxLoginAttempts}, minPwLen=${config.minPasswordLength}, skyY=${config.skyY}, autoAuthOps=${config.autoAuthOps}, inviteCodeLength=${config.inviteCodeLength}")
+		LOGGER.info("Config loaded: authTimeout=${config.authTimeoutSeconds}s, softBan=${config.softBanMinutes}min, maxAttempts=${config.maxLoginAttempts}, minPwLen=${config.minPasswordLength}, skyY=${config.skyY}, autoAuthOps=${config.autoAuthOps}, inviteCodeLength=${config.inviteCodeLength}, databaseType=${config.databaseType}")
 
-		val dbPath = cfgDir.resolve("offlineauth.db")
-		val database = DatabaseManager(dbPath)
+		val database = if (config.databaseType.equals("postgresql", ignoreCase = true)) {
+			LOGGER.info("Using PostgreSQL database at ${config.postgresHost}:${config.postgresPort}/${config.postgresDatabase}")
+			DatabaseManager(config)
+		} else {
+			val dbPath = cfgDir.resolve("offlineauth.db")
+			LOGGER.info("Using SQLite database at $dbPath")
+			DatabaseManager(dbPath)
+		}
 		val manager = AuthManager(database, config)
 		authManager = manager
 
