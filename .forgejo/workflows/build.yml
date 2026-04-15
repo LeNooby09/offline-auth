@@ -17,10 +17,7 @@ jobs:
           apt-get install -y git nodejs
 
       - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup Gradle
-        uses: gradle/actions/setup-gradle@v4
+        uses: https://data.forgejo.org/actions/checkout@v4
 
       - name: Make gradlew executable
         run: chmod +x gradlew
@@ -29,7 +26,7 @@ jobs:
         run: ./gradlew build
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v3
+        uses: https://data.forgejo.org/actions/upload-artifact@v3
         with:
           name: offline-auth
           path: build/libs/*.jar
