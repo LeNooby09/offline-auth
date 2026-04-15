@@ -1,0 +1,35 @@
+name: Build Mod
+
+on:
+  push:
+    branches: ["*"]
+  pull_request:
+
+jobs:
+  build:
+    runs-on: docker
+    container:
+      image: eclipse-temurin:21-jdk
+    steps:
+      - name: Install dependencies
+        run: |
+          apt-get update
+          apt-get install -y git nodejs
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Make gradlew executable
+        run: chmod +x gradlew
+
+      - name: Build
+        run: ./gradlew build
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: offline-auth
+          path: build/libs/*.jar
