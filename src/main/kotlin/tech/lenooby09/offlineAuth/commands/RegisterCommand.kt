@@ -103,7 +103,7 @@ object RegisterCommand {
 				if (grantAdmin) {
 					authManager.database.setAccountOp(account.id, isOp = true, opLevel = 4)
 				}
-			} catch (e: Exception) {
+			} catch (_: Exception) {
 				return@runAsync "§cRegistration failed. Please try again." to null
 			}
 

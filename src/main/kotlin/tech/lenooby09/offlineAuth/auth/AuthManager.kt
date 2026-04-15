@@ -340,7 +340,7 @@ class AuthManager(val database: DatabaseManager, var config: OfflineAuthConfig) 
 		// Teleport player to their saved position FIRST, before sending any entity/tab
 		// packets, so Geyser/Bedrock players are placed at the correct position when
 		// the entity respawn packets are sent.
-		player.setInvisible(false)
+		player.isInvisible = false
 		val accountPos = database.loadAccountPosition(account.id)
 		if (accountPos != null) {
 			val level = resolveDimension(accountPos.dimension)
@@ -386,7 +386,7 @@ class AuthManager(val database: DatabaseManager, var config: OfflineAuthConfig) 
 		// Restore inventory AFTER teleporting to the correct position
 		loadPlayerInventory(player, account)
 
-		player.setInvulnerable(false)
+		player.isInvulnerable = false
 
 		// Revoke temporary flight unless player is in creative/spectator
 		if (!player.isCreative && !player.isSpectator) {

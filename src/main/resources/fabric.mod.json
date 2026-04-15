@@ -4,7 +4,7 @@
   "version": "${version}",
   "name": "OfflineAuth",
   "description": "Server-side authentication mod with invite codes, password login, and display name override for offline-mode servers.",
-  "authors": [],
+  "authors": ["LeNooby09"],
   "contact": {},
   "license": "GPL-3.0",
   "environment": "server",
