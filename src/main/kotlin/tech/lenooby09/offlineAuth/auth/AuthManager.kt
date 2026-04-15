@@ -51,6 +51,9 @@ class AuthManager(val database: DatabaseManager, var config: OfflineAuthConfig) 
 	val accountMap = ConcurrentHashMap<UUID, AuthAccount>()
 	val loginAttempts = ConcurrentHashMap<UUID, Int>()
 
+	// Pending 2FA: player UUID -> account that passed password check but awaits TOTP
+	val pending2fa = ConcurrentHashMap<UUID, AuthAccount>()
+
 	private val kickTimers = ConcurrentHashMap<UUID, ScheduledFuture<*>>()
 	private val warningTimers = ConcurrentHashMap<UUID, MutableList<ScheduledFuture<*>>>()
 	private val scheduler = Executors.newScheduledThreadPool(1)
@@ -252,6 +255,7 @@ class AuthManager(val database: DatabaseManager, var config: OfflineAuthConfig) 
 		}
 		authStates.remove(player.uuid)
 		loginAttempts.remove(player.uuid)
+		pending2fa.remove(player.uuid)
 		spawnPositions.remove(player.uuid)
 	}
 

@@ -84,6 +84,20 @@ class WebDashboard(
 				call.respondText(DashboardHtml.INDEX, ContentType.Text.Html)
 			}
 
+			// --- QR code image endpoint (one-time token, no auth required) ---
+			get("/qr/{token}") {
+				val token = call.parameters["token"] ?: run {
+					call.respond(HttpStatusCode.BadRequest, ErrorResponse("Missing token."))
+					return@get
+				}
+				val png = tech.lenooby09.offlineAuth.auth.QrCodeUtil.consumeQrImage(token)
+				if (png == null) {
+					call.respond(HttpStatusCode.NotFound, ErrorResponse("QR code not found or already used."))
+					return@get
+				}
+				call.respondBytes(png, ContentType.Image.PNG)
+			}
+
 			// --- Auth endpoints ---
 			post("/api/login") {
 				val request = call.receive<LoginRequest>()
@@ -148,6 +162,7 @@ class WebDashboard(
 						registeredAt = acc.registeredAt,
 						linkedUUIDs = database.getLinkedUUIDs(acc.id),
 						isDashboardAdmin = acc.isDashboardAdmin,
+						has2fa = database.has2faEnabled(acc.id),
 					)
 				}
 				call.respond(accounts)
@@ -178,6 +193,7 @@ class WebDashboard(
 						registeredAt = account.registeredAt,
 						linkedUUIDs = database.getLinkedUUIDs(account.id),
 						isDashboardAdmin = account.isDashboardAdmin,
+						has2fa = database.has2faEnabled(account.id),
 					)
 				)
 			}
@@ -217,6 +233,7 @@ class WebDashboard(
 					registeredAt = account.registeredAt,
 					linkedUUIDs = emptyList(),
 					isDashboardAdmin = account.isDashboardAdmin,
+					has2fa = false,
 				))
 			}
 
@@ -297,6 +314,27 @@ class WebDashboard(
 				val hash = BCrypt.withDefaults().hashToString(12, request.newPassword.toCharArray())
 				database.updatePasswordHash(accountId, hash)
 				call.respond(SuccessResponse("Password updated."))
+			}
+
+			put("/api/accounts/{id}/reset2fa") {
+				call.requireAdmin() ?: return@put
+				val id = call.parameters["id"] ?: run {
+					call.respond(HttpStatusCode.BadRequest, ErrorResponse("Missing account ID."))
+					return@put
+				}
+
+				val accountId = try { UUID.fromString(id) } catch (_: Exception) {
+					call.respond(HttpStatusCode.BadRequest, ErrorResponse("Invalid account ID."))
+					return@put
+				}
+
+				if (!database.has2faEnabled(accountId)) {
+					call.respond(HttpStatusCode.BadRequest, ErrorResponse("2FA is not enabled for this account."))
+					return@put
+				}
+
+				database.setTotpSecret(accountId, null)
+				call.respond(SuccessResponse("2FA has been reset."))
 			}
 
 			put("/api/accounts/{id}/admin") {
@@ -483,6 +521,7 @@ class WebDashboard(
 		val registeredAt: Long,
 		val linkedUUIDs: List<String>,
 		val isDashboardAdmin: Boolean,
+		val has2fa: Boolean = false,
 	)
 
 	@Serializable

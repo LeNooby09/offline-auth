@@ -94,7 +94,7 @@ th{color:#888;font-weight:normal;text-transform:uppercase;font-size:.75rem}
 <button class="primary" onclick="showCreateAccount()">+ Create</button>
 </div>
 <table>
-<thead><tr><th>Username</th><th>ID</th><th>Registered</th><th>UUIDs</th><th>Admin</th><th>Actions</th></tr></thead>
+<thead><tr><th>Username</th><th>ID</th><th>Registered</th><th>UUIDs</th><th>Admin</th><th>2FA</th><th>Actions</th></tr></thead>
 <tbody id="accountsTable"></tbody>
 </table>
 </div>
@@ -184,11 +184,12 @@ function switchTab(name,el){document.querySelectorAll('.tabs button').forEach(t=
 
 async function loadAccounts(){
 	try{const r=await api('GET','/api/accounts');if(!r.ok)return;const accs=await r.json();const tb=document.getElementById('accountsTable');
-	if(!accs.length){tb.innerHTML='<tr><td colspan="6" style="color:#888">No accounts.</td></tr>';return;}
-	tb.innerHTML=accs.map(a=>'<tr><td><strong>'+esc(a.username)+'</strong></td><td style="font-size:.75rem">'+esc(a.id.substring(0,8))+'…</td><td>'+fmtDate(a.registeredAt)+'</td><td>'+a.linkedUUIDs.length+'</td><td>'+(a.isDashboardAdmin?'✓':'')+'</td><td>'+
+	if(!accs.length){tb.innerHTML='<tr><td colspan="7" style="color:#888">No accounts.</td></tr>';return;}
+	tb.innerHTML=accs.map(a=>'<tr><td><strong>'+esc(a.username)+'</strong></td><td style="font-size:.75rem">'+esc(a.id.substring(0,8))+'…</td><td>'+fmtDate(a.registeredAt)+'</td><td>'+a.linkedUUIDs.length+'</td><td>'+(a.isDashboardAdmin?'✓':'')+'</td><td>'+(a.has2fa?'✓':'')+'</td><td>'+
 	'<button onclick="showRename(\''+esc(a.id)+'\',\''+esc(a.username)+'\')">Rename</button> '+
 	'<button onclick="showChangePw(\''+esc(a.id)+'\',\''+esc(a.username)+'\')">Password</button> '+
 	'<button onclick="toggleAdmin(\''+esc(a.id)+'\','+(!a.isDashboardAdmin)+')">'+(a.isDashboardAdmin?'Revoke Admin':'Grant Admin')+'</button> '+
+	(a.has2fa?'<button onclick="reset2fa(\''+esc(a.id)+'\',\''+esc(a.username)+'\')">Reset 2FA</button> ':'')+
 	'<button class="danger" onclick="deleteAccount(\''+esc(a.id)+'\',\''+esc(a.username)+'\')">Delete</button>'+
 	'</td></tr>').join('');}catch{}
 }
@@ -205,6 +206,7 @@ function showChangePw(id,name){showModal('<h3>Change Password</h3><p style="colo
 async function changePw(id){const p=document.getElementById('npInput').value;if(!p)return;const r=await api('PUT','/api/accounts/'+id+'/password',{newPassword:p});const d=await r.json();if(r.ok){toast('Updated.','success');closeModal();}else toast(d.error||'Failed.','error');}
 
 async function toggleAdmin(id,grant){const r=await api('PUT','/api/accounts/'+id+'/admin',{isAdmin:grant});if(r.ok){toast(grant?'Admin granted.':'Admin revoked.','success');loadAccounts();}else toast('Failed.','error');}
+async function reset2fa(id,name){if(!confirm('Reset 2FA for "'+name+'"?'))return;const r=await api('PUT','/api/accounts/'+id+'/reset2fa');if(r.ok){toast('2FA reset.','success');loadAccounts();}else{const d=await r.json();toast(d.error||'Failed.','error');}}
 
 async function loadInvites(){
 	try{const r=await api('GET','/api/invites');if(!r.ok)return;const inv=await r.json();const tb=document.getElementById('invitesTable');

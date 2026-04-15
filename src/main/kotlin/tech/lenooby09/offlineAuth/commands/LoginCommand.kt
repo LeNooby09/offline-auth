@@ -15,6 +15,7 @@ import tech.lenooby09.offlineAuth.auth.AuthState
 
 private sealed class LoginResult {
 	data class Success(val account: AuthAccount) : LoginResult()
+	data class Needs2FA(val account: AuthAccount) : LoginResult()
 	data class Failed(val account: AuthAccount) : LoginResult()
 	data class Error(val message: String) : LoginResult()
 	data class Lockout(val message: Component) : LoginResult()
@@ -84,12 +85,21 @@ object LoginCommand {
 			}
 
 			authManager.database.resetLoginAttempts(account.id)
-			LoginResult.Success(account)
+			if (authManager.database.has2faEnabled(account.id)) {
+				LoginResult.Needs2FA(account)
+			} else {
+				LoginResult.Success(account)
+			}
 		}, { result ->
 			when (result) {
 				is LoginResult.Error -> player.sendSystemMessage(Component.literal(result.message))
 				is LoginResult.Lockout -> player.sendSystemMessage(result.message)
 				is LoginResult.Failed -> handleFailedLogin(player, authManager, result.account)
+				is LoginResult.Needs2FA -> {
+					authManager.pending2fa[player.uuid] = result.account
+					authManager.authStates[player.uuid] = AuthState.AWAITING_2FA
+					player.sendSystemMessage(Component.literal("§ePassword accepted. Enter your 2FA code with §6/2fa verify <code>"))
+				}
 				is LoginResult.Success -> {
 					if (alreadyAuthenticated) {
 						authManager.prepareAccountSwitch(player)
@@ -136,12 +146,21 @@ object LoginCommand {
 			}
 
 			authManager.database.resetLoginAttempts(account.id)
-			LoginResult.Success(account)
+			if (authManager.database.has2faEnabled(account.id)) {
+				LoginResult.Needs2FA(account)
+			} else {
+				LoginResult.Success(account)
+			}
 		}, { result ->
 			when (result) {
 				is LoginResult.Error -> player.sendSystemMessage(Component.literal(result.message))
 				is LoginResult.Lockout -> player.sendSystemMessage(result.message)
 				is LoginResult.Failed -> handleFailedLogin(player, authManager, result.account)
+				is LoginResult.Needs2FA -> {
+					authManager.pending2fa[player.uuid] = result.account
+					authManager.authStates[player.uuid] = AuthState.AWAITING_2FA
+					player.sendSystemMessage(Component.literal("§ePassword accepted. Enter your 2FA code with §6/2fa verify <code>"))
+				}
 				is LoginResult.Success -> {
 					if (alreadyAuthenticated) {
 						authManager.prepareAccountSwitch(player)

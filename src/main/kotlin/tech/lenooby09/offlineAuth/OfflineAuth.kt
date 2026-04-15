@@ -15,6 +15,7 @@ import tech.lenooby09.offlineAuth.commands.AdminCommands
 import tech.lenooby09.offlineAuth.commands.ChangePasswordCommand
 import tech.lenooby09.offlineAuth.commands.LoginCommand
 import tech.lenooby09.offlineAuth.commands.RegisterCommand
+import tech.lenooby09.offlineAuth.commands.TwoFactorCommand
 import tech.lenooby09.offlineAuth.config.OfflineAuthConfig
 import tech.lenooby09.offlineAuth.storage.DatabaseManager
 import tech.lenooby09.offlineAuth.web.WebDashboard
@@ -98,6 +99,7 @@ class OfflineAuth : ModInitializer {
 			LoginCommand.register(dispatcher, manager)
 			ChangePasswordCommand.register(dispatcher, manager)
 			AdminCommands.register(dispatcher, manager)
+			TwoFactorCommand.register(dispatcher, manager)
 		}
 	}
 

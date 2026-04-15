@@ -60,6 +60,7 @@ dependencies {
 	include("org.slf4j:slf4j-api:2.0.16")
 	include(implementation("at.favre.lib:bcrypt:0.10.2")!!)
 	include("at.favre.lib:bytes:1.5.0")
+	include(implementation("io.nayuki:qrcodegen:1.8.0")!!)
 
 	// Ktor embedded web server (CIO engine to avoid Netty conflicts with Minecraft)
 	val ktorVersion = "3.4.0"

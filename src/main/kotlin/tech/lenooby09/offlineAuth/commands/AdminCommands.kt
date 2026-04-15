@@ -120,6 +120,14 @@ object AdminCommands {
 								.executes { ctx -> deopAccount(ctx, authManager) }
 						)
 				)
+				.then(
+					literal("reset2fa")
+						.then(
+							argument("username", string())
+								.suggests(suggestUsernames)
+								.executes { ctx -> reset2fa(ctx, authManager) }
+						)
+				)
 		)
 	}
 
@@ -332,6 +340,28 @@ object AdminCommands {
 		authManager.applyOpToOnlinePlayer(account, op = false)
 		ctx.source.sendSuccess(
 			{ Component.literal("§eAccount '${account.username}' is no longer OP.") },
+			true
+		)
+		return 1
+	}
+
+	private fun reset2fa(ctx: CommandContext<CommandSourceStack>, authManager: AuthManager): Int {
+		val username = getString(ctx, "username")
+		val account = authManager.database.getAccountByUsername(username)
+
+		if (account == null) {
+			ctx.source.sendFailure(Component.literal("§cAccount '$username' not found."))
+			return 0
+		}
+
+		if (!authManager.database.has2faEnabled(account.id)) {
+			ctx.source.sendFailure(Component.literal("§c2FA is not enabled for '$username'."))
+			return 0
+		}
+
+		authManager.database.setTotpSecret(account.id, null)
+		ctx.source.sendSuccess(
+			{ Component.literal("§a2FA has been reset for §e${account.username}§a.") },
 			true
 		)
 		return 1

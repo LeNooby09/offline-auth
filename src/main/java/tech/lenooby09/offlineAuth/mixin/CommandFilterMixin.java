@@ -31,11 +31,11 @@ public abstract class CommandFilterMixin {
     }
 
     private static final Set<String> AUTH_COMMANDS = Set.of(
-            "register", "r", "login", "l", "login_as", "ls", "changepassword"
+            "register", "r", "login", "l", "login_as", "ls", "changepassword", "2fa"
     );
 
     private static final Set<String> SENSITIVE_COMMANDS = Set.of(
-            "login", "l", "login_as", "ls", "register", "r", "changepassword"
+            "login", "l", "login_as", "ls", "register", "r", "changepassword", "2fa"
     );
 
     private void filterCommand(String command, CallbackInfo ci) {

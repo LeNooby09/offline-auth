@@ -280,9 +280,10 @@ class DatabaseManager {
 
 			migratePlayerDataSchema(conn)
 
-			// Migrate accounts table
+ 		// Migrate accounts table
 			val accColumns = getTableColumns(conn, "accounts")
 			addColumnIfMissing(conn, "accounts", "is_dashboard_admin", "INTEGER NOT NULL DEFAULT 0", accColumns)
+			addColumnIfMissing(conn, "accounts", "totp_secret", "TEXT", accColumns)
 		}
 	}
 
@@ -1106,6 +1107,43 @@ class DatabaseManager {
 	}
 
 	data class SessionRecord(val accountId: String, val username: String, val ipAddress: String, val expiresAt: Long)
+
+	// --- 2FA operations ---
+
+	fun getTotpSecret(accountId: UUID): String? {
+		connection().use { conn ->
+			conn.prepareStatement(
+				"SELECT totp_secret FROM accounts WHERE id = ?"
+			).use { stmt ->
+				stmt.setString(1, accountId.toString())
+				val rs = stmt.executeQuery()
+				if (rs.next()) {
+					return rs.getString("totp_secret")
+				}
+			}
+		}
+		return null
+	}
+
+	fun setTotpSecret(accountId: UUID, secret: String?) {
+		connection().use { conn ->
+			conn.prepareStatement(
+				"UPDATE accounts SET totp_secret = ? WHERE id = ?"
+			).use { stmt ->
+				if (secret != null) {
+					stmt.setString(1, secret)
+				} else {
+					stmt.setNull(1, java.sql.Types.VARCHAR)
+				}
+				stmt.setString(2, accountId.toString())
+				stmt.executeUpdate()
+			}
+		}
+	}
+
+	fun has2faEnabled(accountId: UUID): Boolean {
+		return getTotpSecret(accountId) != null
+	}
 
 	fun close() {
 		if (!dataSource.isClosed) {
