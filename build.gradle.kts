@@ -81,17 +81,31 @@ dependencies {
 	include(implementation("org.jetbrains.kotlinx:kotlinx-io-core:0.6.0")!!)
 }
 
+val generateJdbcServiceFile by tasks.registering {
+	val outputFile = layout.buildDirectory.file("generated/jdbc-service/META-INF/services/java.sql.Driver")
+	outputs.file(outputFile)
+	doLast {
+		val f = outputFile.get().asFile
+		f.parentFile.mkdirs()
+		f.writeText("org.sqlite.JDBC\norg.postgresql.Driver\n", Charsets.UTF_8)
+	}
+}
+
 tasks.jar {
+	dependsOn(generateJdbcServiceFile)
 	from({
 		configurations.runtimeClasspath.get()
 			.filter { it.name.contains("sqlite-jdbc") || it.name.contains("postgresql") }
 			.map { zipTree(it) }
 	}) {
+		duplicatesStrategy = DuplicatesStrategy.EXCLUDE
 		exclude("META-INF/MANIFEST.MF")
 		exclude("META-INF/*.SF")
 		exclude("META-INF/*.DSA")
 		exclude("META-INF/*.RSA")
+		exclude("META-INF/services/java.sql.Driver")
 	}
+	from(layout.buildDirectory.dir("generated/jdbc-service"))
 }
 
 tasks.processResources {

@@ -356,7 +356,7 @@ class AuthManager(val database: DatabaseManager, var config: OfflineAuthConfig) 
 				)
 			} else {
 				player.teleportTo(
-					player.level() as net.minecraft.server.level.ServerLevel,
+					player.level(),
 					accountPos.x, accountPos.y, accountPos.z,
 					emptySet(), accountPos.yaw, accountPos.pitch, false
 				)
@@ -369,7 +369,7 @@ class AuthManager(val database: DatabaseManager, var config: OfflineAuthConfig) 
 					player.teleportTo(level, pos.x, pos.y, pos.z, emptySet(), player.yRot, player.xRot, false)
 				} else {
 					player.teleportTo(
-						player.level() as net.minecraft.server.level.ServerLevel,
+						player.level(),
 						pos.x, pos.y, pos.z,
 						emptySet(), player.yRot, player.xRot, false
 					)
@@ -521,7 +521,7 @@ class AuthManager(val database: DatabaseManager, var config: OfflineAuthConfig) 
 	private fun extractAddress(player: ServerPlayer): String? {
 		return try {
 			val connection = (player.connection as tech.lenooby09.offlineAuth.mixin.ConnectionAccessor).connection
-			val address = connection.remoteAddress?.toString()?.substringBefore(":")?.removePrefix("/")
+			val address = connection.remoteAddress.toString().substringBefore(":").removePrefix("/")
 			address
 		} catch (e: Exception) {
 			OfflineAuth.LOGGER.warn("Failed to extract IP address for player ${player.gameProfile.name}", e)
