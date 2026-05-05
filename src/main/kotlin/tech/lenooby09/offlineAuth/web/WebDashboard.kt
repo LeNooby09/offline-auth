@@ -14,6 +14,10 @@ import io.ktor.server.routing.*
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import tech.lenooby09.offlineAuth.OfflineAuth
+import tech.lenooby09.offlineAuth.atproto.AtprotoListResolver
+import tech.lenooby09.offlineAuth.atproto.AtprotoOAuthClient
+import tech.lenooby09.offlineAuth.atproto.BlueskySessionStore
+import tech.lenooby09.offlineAuth.atproto.blueskyAuthRoutes
 import tech.lenooby09.offlineAuth.auth.AuthManager
 import tech.lenooby09.offlineAuth.commands.AdminCommands
 import tech.lenooby09.offlineAuth.config.OfflineAuthConfig
@@ -26,6 +30,11 @@ class WebDashboard(
 	private val database: DatabaseManager,
 	private val authManager: AuthManager,
 	private val config: OfflineAuthConfig,
+	// Bluesky-mode dependencies. All `null` in password mode; injected when bluesky-enabled=true
+	// passes validation. Keeping them nullable lets the password-mode constructor call stay unchanged.
+	private val atprotoClient: AtprotoOAuthClient? = null,
+	private val listResolver: AtprotoListResolver? = null,
+	private val blueskySessionStore: BlueskySessionStore? = null,
 ) {
 
 	private var server: EmbeddedServer<CIOApplicationEngine, CIOApplicationEngine.Configuration>? = null
@@ -84,6 +93,18 @@ class WebDashboard(
 				call.respondText(DashboardHtml.INDEX, ContentType.Text.Html)
 			}
 
+			// Mount Bluesky OAuth routes only when explicitly enabled and properly wired.
+			// In password mode, these routes do not exist on the server.
+			if (config.blueskyEnabled && atprotoClient != null && listResolver != null && blueskySessionStore != null) {
+				blueskyAuthRoutes(
+					config = config,
+					atprotoClient = atprotoClient,
+					listResolver = listResolver,
+					authManager = authManager,
+					sessionStore = blueskySessionStore,
+				)
+			}
+
 			// --- QR code image endpoint (one-time token, no auth required) ---
 			get("/qr/{token}") {
 				val token = call.parameters["token"] ?: run {
@@ -108,7 +129,12 @@ class WebDashboard(
 					return@post
 				}
 
-				val result = BCrypt.verifyer().verify(request.password.toCharArray(), account.passwordHash)
+				val pwHash = account.passwordHash
+				if (pwHash == null) {
+					call.respond(HttpStatusCode.Unauthorized, ErrorResponse("Invalid username or password."))
+					return@post
+				}
+				val result = BCrypt.verifyer().verify(request.password.toCharArray(), pwHash)
 				if (!result.verified) {
 					call.respond(HttpStatusCode.Unauthorized, ErrorResponse("Invalid username or password."))
 					return@post
@@ -156,6 +182,7 @@ class WebDashboard(
 			get("/api/accounts") {
 				val session = call.requireAdmin() ?: return@get
 				val accounts = database.getAllAccounts().map { acc ->
+					val bskyLink = database.getBlueskyLink(acc.id)
 					AccountResponse(
 						id = acc.id.toString(),
 						username = acc.username,
@@ -163,6 +190,9 @@ class WebDashboard(
 						linkedUUIDs = database.getLinkedUUIDs(acc.id),
 						isDashboardAdmin = acc.isDashboardAdmin,
 						has2fa = database.has2faEnabled(acc.id),
+						did = bskyLink?.did,
+						handle = bskyLink?.handle,
+						avatarUrl = bskyLink?.avatarUrl,
 					)
 				}
 				call.respond(accounts)
@@ -186,6 +216,7 @@ class WebDashboard(
 					return@get
 				}
 
+				val bskyLink = database.getBlueskyLink(account.id)
 				call.respond(
 					AccountResponse(
 						id = account.id.toString(),
@@ -194,6 +225,9 @@ class WebDashboard(
 						linkedUUIDs = database.getLinkedUUIDs(account.id),
 						isDashboardAdmin = account.isDashboardAdmin,
 						has2fa = database.has2faEnabled(account.id),
+						did = bskyLink?.did,
+						handle = bskyLink?.handle,
+						avatarUrl = bskyLink?.avatarUrl,
 					)
 				)
 			}
@@ -522,6 +556,10 @@ class WebDashboard(
 		val linkedUUIDs: List<String>,
 		val isDashboardAdmin: Boolean,
 		val has2fa: Boolean = false,
+		// Bluesky link fields — null in password mode and for password-mode accounts in mixed DBs.
+		val did: String? = null,
+		val handle: String? = null,
+		val avatarUrl: String? = null,
 	)
 
 	@Serializable

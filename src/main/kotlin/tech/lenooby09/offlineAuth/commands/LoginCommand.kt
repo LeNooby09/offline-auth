@@ -53,6 +53,8 @@ object LoginCommand {
 	}
 
 	private fun executeSimple(ctx: CommandContext<CommandSourceStack>, authManager: AuthManager): Int {
+		if (authManager.denyIfBluesky(ctx.source)) return 0
+
 		val player = ctx.source.playerOrException
 		val password = getString(ctx, "password")
 		val alreadyAuthenticated = authManager.authStates[player.uuid] == AuthState.AUTHENTICATED
@@ -79,7 +81,9 @@ object LoginCommand {
 				return@runAsync LoginResult.Lockout(lockoutMsg)
 			}
 
-			val result = BCrypt.verifyer().verify(password.toCharArray(), account.passwordHash)
+			val pwHash = account.passwordHash
+				?: return@runAsync LoginResult.Error("§cThis account does not support password login.")
+			val result = BCrypt.verifyer().verify(password.toCharArray(), pwHash)
 			if (!result.verified) {
 				return@runAsync LoginResult.Failed(account)
 			}
@@ -114,6 +118,8 @@ object LoginCommand {
 	}
 
 	private fun executeWithUsername(ctx: CommandContext<CommandSourceStack>, authManager: AuthManager): Int {
+		if (authManager.denyIfBluesky(ctx.source)) return 0
+
 		val player = ctx.source.playerOrException
 		val username = getString(ctx, "username")
 		val password = getString(ctx, "password")
@@ -140,7 +146,9 @@ object LoginCommand {
 				return@runAsync LoginResult.Lockout(lockoutMsg)
 			}
 
-			val result = BCrypt.verifyer().verify(password.toCharArray(), account.passwordHash)
+			val pwHash = account.passwordHash
+				?: return@runAsync LoginResult.Error("§cThis account does not support password login.")
+			val result = BCrypt.verifyer().verify(password.toCharArray(), pwHash)
 			if (!result.verified) {
 				return@runAsync LoginResult.Failed(account)
 			}

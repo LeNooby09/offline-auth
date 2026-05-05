@@ -28,6 +28,8 @@ object ChangePasswordCommand {
 	}
 
 	private fun execute(ctx: CommandContext<CommandSourceStack>, authManager: AuthManager): Int {
+		if (authManager.denyIfBluesky(ctx.source)) return 0
+
 		val player = ctx.source.playerOrException
 		val oldPassword = getString(ctx, "old_password")
 		val newPassword = getString(ctx, "new_password")
@@ -52,7 +54,9 @@ object ChangePasswordCommand {
 
 		// Offload BCrypt verify + hash + DB write to the IO executor
 		authManager.runAsync({
-			val result = BCrypt.verifyer().verify(oldPassword.toCharArray(), account.passwordHash)
+			val pwHash = account.passwordHash
+				?: return@runAsync null to "§cThis account does not have a password to change."
+			val result = BCrypt.verifyer().verify(oldPassword.toCharArray(), pwHash)
 			if (!result.verified) {
 				return@runAsync null to "§cIncorrect current password."
 			}

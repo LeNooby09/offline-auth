@@ -79,6 +79,22 @@ dependencies {
 	include(implementation("io.ktor:ktor-io:$ktorVersion")!!)
 	include(implementation("io.ktor:ktor-serialization:$ktorVersion")!!)
 	include(implementation("org.jetbrains.kotlinx:kotlinx-io-core:0.6.0")!!)
+
+	// Ktor HTTP client (for ATProto OAuth flow)
+	include(implementation("io.ktor:ktor-client-core:$ktorVersion")!!)
+	include(implementation("io.ktor:ktor-client-cio:$ktorVersion")!!)
+	include(implementation("io.ktor:ktor-client-content-negotiation:$ktorVersion")!!)
+
+	// Nimbus JOSE+JWT (for DPoP key generation/proof in ATProto OAuth)
+	include(implementation("com.nimbusds:nimbus-jose-jwt:10.0.1")!!)
+
+	// Test dependencies (only used during `gradle test`).
+	testImplementation(kotlin("test"))
+	testImplementation("io.ktor:ktor-client-mock:$ktorVersion")
+}
+
+tasks.withType<Test>().configureEach {
+	useJUnitPlatform()
 }
 
 val generateJdbcServiceFile by tasks.registering {

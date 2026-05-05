@@ -3,9 +3,11 @@ package tech.lenooby09.offlineAuth.storage
 import com.zaxxer.hikari.HikariConfig
 import com.zaxxer.hikari.HikariDataSource
 import tech.lenooby09.offlineAuth.auth.AuthAccount
+import tech.lenooby09.offlineAuth.auth.BlueskyLink
 import tech.lenooby09.offlineAuth.config.OfflineAuthConfig
 import java.nio.file.Path
 import java.sql.Connection
+import java.sql.Types
 import java.util.*
 
 enum class DatabaseType {
@@ -231,6 +233,24 @@ class DatabaseManager {
                 )
                 """.trimIndent()
 				)
+
+				// Bluesky/ATProto identity link. Migration is unconditional so flipping
+				// bluesky-enabled later doesn't require another schema bump.
+				stmt.executeUpdate(
+					"""
+                CREATE TABLE IF NOT EXISTS bluesky_links (
+                    account_id TEXT PRIMARY KEY,
+                    did TEXT NOT NULL UNIQUE,
+                    handle TEXT NOT NULL,
+                    avatar_url TEXT,
+                    linked_at BIGINT NOT NULL,
+                    FOREIGN KEY (account_id) REFERENCES accounts(id)
+                )
+                """.trimIndent()
+				)
+				stmt.executeUpdate(
+					"CREATE INDEX IF NOT EXISTS idx_bluesky_links_did ON bluesky_links(did)"
+				)
 			}
 		}
 	}
@@ -284,6 +304,80 @@ class DatabaseManager {
 			val accColumns = getTableColumns(conn, "accounts")
 			addColumnIfMissing(conn, "accounts", "is_dashboard_admin", "INTEGER NOT NULL DEFAULT 0", accColumns)
 			addColumnIfMissing(conn, "accounts", "totp_secret", "TEXT", accColumns)
+
+			// Drop NOT NULL on password_hash so Bluesky-created accounts can omit it.
+			// Idempotent: running on an already-migrated DB is a no-op.
+			migratePasswordHashNullable(conn)
+		}
+	}
+
+	/**
+	 * Make `accounts.password_hash` NULL-able. Idempotent across both SQLite and PostgreSQL.
+	 *
+	 * On SQLite there is no `ALTER TABLE ... DROP NOT NULL`, so we use the
+	 * standard rebuild-via-temp-table dance: create a new table with the relaxed
+	 * constraint, copy rows, drop the old table, rename the new one. The dance
+	 * is only performed when the existing column is still declared `NOT NULL`.
+	 */
+	private fun migratePasswordHashNullable(conn: Connection) {
+		if (dbType == DatabaseType.POSTGRESQL) {
+			conn.createStatement().use { stmt ->
+				try {
+					stmt.executeUpdate("ALTER TABLE accounts ALTER COLUMN password_hash DROP NOT NULL")
+				} catch (_: Exception) {
+					// Already nullable — safe to ignore.
+				}
+			}
+			return
+		}
+
+		// SQLite path: detect NOT NULL via PRAGMA table_info and rebuild only if needed.
+		val needsRebuild = conn.createStatement().use { stmt ->
+			val rs = stmt.executeQuery("PRAGMA table_info(accounts)")
+			var found = false
+			while (rs.next()) {
+				if (rs.getString("name") == "password_hash") {
+					// "notnull" column is 1 if the constraint is set, 0 otherwise.
+					if (rs.getInt("notnull") == 1) found = true
+					break
+				}
+			}
+			found
+		}
+		if (!needsRebuild) return
+
+		conn.autoCommit = false
+		try {
+			conn.createStatement().use { stmt ->
+				stmt.executeUpdate(
+					"""
+                    CREATE TABLE accounts_new (
+                        id TEXT PRIMARY KEY,
+                        username TEXT NOT NULL UNIQUE,
+                        password_hash TEXT,
+                        registered_at BIGINT NOT NULL,
+                        is_dashboard_admin INTEGER NOT NULL DEFAULT 0,
+                        totp_secret TEXT
+                    )
+                    """.trimIndent()
+				)
+				// Copy all existing rows. `totp_secret` may not exist on very old DBs;
+				// the addColumnIfMissing call earlier in migrateSchema ensures it does.
+				stmt.executeUpdate(
+					"""
+                    INSERT INTO accounts_new (id, username, password_hash, registered_at, is_dashboard_admin, totp_secret)
+                    SELECT id, username, password_hash, registered_at, is_dashboard_admin, totp_secret FROM accounts
+                    """.trimIndent()
+				)
+				stmt.executeUpdate("DROP TABLE accounts")
+				stmt.executeUpdate("ALTER TABLE accounts_new RENAME TO accounts")
+			}
+			conn.commit()
+		} catch (e: Exception) {
+			conn.rollback()
+			throw e
+		} finally {
+			conn.autoCommit = true
 		}
 	}
 
@@ -323,7 +417,11 @@ class DatabaseManager {
 			).use { stmt ->
 				stmt.setString(1, account.id.toString())
 				stmt.setString(2, account.username)
-				stmt.setString(3, account.passwordHash)
+				if (account.passwordHash != null) {
+					stmt.setString(3, account.passwordHash)
+				} else {
+					stmt.setNull(3, Types.VARCHAR)
+				}
 				stmt.setLong(4, account.registeredAt)
 				stmt.setInt(5, if (account.isDashboardAdmin) 1 else 0)
 				stmt.executeUpdate()
@@ -390,6 +488,74 @@ class DatabaseManager {
 				stmt.executeUpdate()
 			}
 		}
+	}
+
+	// --- Bluesky / ATProto identity links ---
+
+	fun getAccountByDid(did: String): AuthAccount? {
+		connection().use { conn ->
+			conn.prepareStatement(
+				"""
+            SELECT a.id, a.username, a.password_hash, a.registered_at, a.is_dashboard_admin
+            FROM accounts a
+            JOIN bluesky_links b ON a.id = b.account_id
+            WHERE b.did = ?
+            """.trimIndent()
+			).use { stmt ->
+				stmt.setString(1, did)
+				val rs = stmt.executeQuery()
+				if (rs.next()) {
+					return AuthAccount(
+						id = UUID.fromString(rs.getString("id")),
+						username = rs.getString("username"),
+						passwordHash = rs.getString("password_hash"),
+						registeredAt = rs.getLong("registered_at"),
+						isDashboardAdmin = rs.getInt("is_dashboard_admin") == 1,
+					)
+				}
+			}
+		}
+		return null
+	}
+
+	fun linkBluesky(accountId: UUID, did: String, handle: String, avatarUrl: String?) {
+		connection().use { conn ->
+			conn.prepareStatement(
+				upsertSql(
+					"bluesky_links", "account_id",
+					listOf("account_id", "did", "handle", "avatar_url", "linked_at"),
+					listOf("did", "handle", "avatar_url", "linked_at"),
+				)
+			).use { stmt ->
+				stmt.setString(1, accountId.toString())
+				stmt.setString(2, did)
+				stmt.setString(3, handle)
+				if (avatarUrl != null) stmt.setString(4, avatarUrl) else stmt.setNull(4, Types.VARCHAR)
+				stmt.setLong(5, System.currentTimeMillis())
+				stmt.executeUpdate()
+			}
+		}
+	}
+
+	fun getBlueskyLink(accountId: UUID): BlueskyLink? {
+		connection().use { conn ->
+			conn.prepareStatement(
+				"SELECT account_id, did, handle, avatar_url, linked_at FROM bluesky_links WHERE account_id = ?"
+			).use { stmt ->
+				stmt.setString(1, accountId.toString())
+				val rs = stmt.executeQuery()
+				if (rs.next()) {
+					return BlueskyLink(
+						accountId = UUID.fromString(rs.getString("account_id")),
+						did = rs.getString("did"),
+						handle = rs.getString("handle"),
+						avatarUrl = rs.getString("avatar_url"),
+						linkedAt = rs.getLong("linked_at"),
+					)
+				}
+			}
+		}
+		return null
 	}
 
 	// --- Invite code operations ---
@@ -637,6 +803,7 @@ class DatabaseManager {
 				conn.prepareStatement("DELETE FROM account_positions WHERE account_id = ?").use { it.setString(1, accountId); it.executeUpdate() }
 				conn.prepareStatement("DELETE FROM registration_ips WHERE account_id = ?").use { it.setString(1, accountId); it.executeUpdate() }
 				conn.prepareStatement("DELETE FROM auth_sessions WHERE account_id = ?").use { it.setString(1, accountId); it.executeUpdate() }
+				conn.prepareStatement("DELETE FROM bluesky_links WHERE account_id = ?").use { it.setString(1, accountId); it.executeUpdate() }
 				conn.prepareStatement("DELETE FROM accounts WHERE id = ?").use { it.setString(1, accountId); it.executeUpdate() }
 				return true
 			}

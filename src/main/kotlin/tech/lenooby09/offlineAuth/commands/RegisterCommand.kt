@@ -36,6 +36,8 @@ object RegisterCommand {
 	}
 
 	private fun execute(ctx: CommandContext<CommandSourceStack>, authManager: AuthManager): Int {
+		if (authManager.denyIfBluesky(ctx.source)) return 0
+
 		val player = ctx.source.playerOrException
 		val inviteCode = getString(ctx, "invite_code")
 		val username = getString(ctx, "username")

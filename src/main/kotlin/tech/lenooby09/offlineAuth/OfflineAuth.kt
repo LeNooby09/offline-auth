@@ -1,5 +1,10 @@
 package tech.lenooby09.offlineAuth
 
+import io.ktor.client.HttpClient
+import io.ktor.client.engine.cio.CIO
+import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
+import io.ktor.serialization.kotlinx.json.json
+import kotlinx.serialization.json.Json
 import net.fabricmc.api.ModInitializer
 import net.fabricmc.fabric.api.command.v2.CommandRegistrationCallback
 import net.fabricmc.fabric.api.event.player.*
@@ -10,8 +15,13 @@ import net.fabricmc.loader.api.FabricLoader
 import net.minecraft.server.level.ServerPlayer
 import net.minecraft.world.InteractionResult
 import org.slf4j.LoggerFactory
+import tech.lenooby09.offlineAuth.atproto.AtprotoListResolver
+import tech.lenooby09.offlineAuth.atproto.AtprotoOAuthClient
+import tech.lenooby09.offlineAuth.atproto.BlueskySessionStore
 import tech.lenooby09.offlineAuth.auth.AuthManager
+import tech.lenooby09.offlineAuth.auth.AuthMode
 import tech.lenooby09.offlineAuth.commands.AdminCommands
+import tech.lenooby09.offlineAuth.commands.BlueskyLoginCommand
 import tech.lenooby09.offlineAuth.commands.ChangePasswordCommand
 import tech.lenooby09.offlineAuth.commands.LoginCommand
 import tech.lenooby09.offlineAuth.commands.RegisterCommand
@@ -37,6 +47,10 @@ class OfflineAuth : ModInitializer {
 
 		var webDashboard: WebDashboard? = null
 			private set
+
+		// Bluesky-mode wiring; all `null` in password mode.
+		internal var blueskyHttpClient: HttpClient? = null
+		internal var blueskySessionStore: BlueskySessionStore? = null
 	}
 
 	override fun onInitialize() {
@@ -60,13 +74,62 @@ class OfflineAuth : ModInitializer {
 		val manager = AuthManager(database, config)
 		authManager = manager
 
+		// Build Bluesky-mode dependencies once if (and only if) the runtime mode is BLUESKY.
+		var atprotoClient: AtprotoOAuthClient? = null
+		var listResolver: AtprotoListResolver? = null
+		if (manager.authMode == AuthMode.BLUESKY) {
+			LOGGER.info("[Bluesky] Auth mode = BLUESKY; constructing OAuth client and list resolver.")
+			try {
+				val httpClient = HttpClient(CIO) {
+					install(ContentNegotiation) {
+						json(Json {
+							ignoreUnknownKeys = true
+							isLenient = true
+						})
+					}
+				}
+				blueskyHttpClient = httpClient
+				atprotoClient = AtprotoOAuthClient(
+					httpClient = httpClient,
+					clientId = config.blueskyClientId,
+					redirectUri = config.blueskyRedirectUri,
+					scope = config.blueskyScope,
+				)
+				listResolver = AtprotoListResolver(
+					httpClient = httpClient,
+					rawRef = config.blueskyWhitelistList,
+					cacheTtlSeconds = config.blueskyListCacheSeconds,
+				)
+				blueskySessionStore = BlueskySessionStore(
+					pairingTokenTtlMs = config.blueskyPairingTokenTtlMinutes * 60 * 1000L,
+				)
+				LOGGER.info("[Bluesky] List resolver bound to {}", listResolver.atUri)
+			} catch (e: Exception) {
+				LOGGER.error("[Bluesky] Failed to initialize Bluesky components — running without Bluesky routes.", e)
+				atprotoClient = null
+				listResolver = null
+				blueskySessionStore = null
+				blueskyHttpClient?.close()
+				blueskyHttpClient = null
+			}
+		}
+
 		registerCommands(manager)
 		registerEvents(manager)
 
-		// Start web dashboard if enabled
-		if (config.webDashboardEnabled) {
+		// Start the embedded web server if either the dashboard is enabled OR Bluesky mode needs it.
+		val needsKtor = config.webDashboardEnabled ||
+			(manager.authMode == AuthMode.BLUESKY && atprotoClient != null && listResolver != null && blueskySessionStore != null)
+		if (needsKtor) {
 			try {
-				val dashboard = WebDashboard(database, manager, config)
+				val dashboard = WebDashboard(
+					database = database,
+					authManager = manager,
+					config = config,
+					atprotoClient = atprotoClient,
+					listResolver = listResolver,
+					blueskySessionStore = blueskySessionStore,
+				)
 				dashboard.start()
 				webDashboard = dashboard
 			} catch (e: Exception) {
@@ -78,11 +141,18 @@ class OfflineAuth : ModInitializer {
 			LOGGER.info("OfflineAuth shutting down...")
 			webDashboard?.stop()
 			webDashboard = null
+			blueskyHttpClient?.close()
+			blueskyHttpClient = null
+			blueskySessionStore = null
 			manager.shutdown()
 		}
 
-		// First boot: generate a one-time admin invite code if no accounts exist
-		if (!database.hasAnyAccounts() && database.getActiveInviteCodes().isEmpty()) {
+		// First boot (password mode only): generate a one-time admin invite code if no accounts exist.
+		// In Bluesky mode the invite-code system is disabled at runtime, so don't create a stale code.
+		if (manager.authMode == AuthMode.PASSWORD &&
+			!database.hasAnyAccounts() &&
+			database.getActiveInviteCodes().isEmpty()
+		) {
  			val adminCode = AdminCommands.generateInviteCode(config.inviteCodeLength)
 			database.saveInviteCode(adminCode, "SYSTEM", System.currentTimeMillis(), 1)
 			LOGGER.info("  No accounts found. A one-time admin invite code has been generated:")
@@ -95,11 +165,21 @@ class OfflineAuth : ModInitializer {
 
 	private fun registerCommands(manager: AuthManager) {
 		CommandRegistrationCallback.EVENT.register { dispatcher, _, _ ->
+			// Legacy password commands stay always-registered; their executors
+			// short-circuit via AuthManager.denyIfBluesky when authMode=BLUESKY.
 			RegisterCommand.register(dispatcher, manager)
 			LoginCommand.register(dispatcher, manager)
 			ChangePasswordCommand.register(dispatcher, manager)
 			AdminCommands.register(dispatcher, manager)
 			TwoFactorCommand.register(dispatcher, manager)
+
+			// /bluesky is registered only when the mode is BLUESKY and the session store exists.
+			if (manager.authMode == AuthMode.BLUESKY) {
+				val store = blueskySessionStore
+				if (store != null) {
+					BlueskyLoginCommand.register(dispatcher, manager, store)
+				}
+			}
 		}
 	}
 
@@ -112,6 +192,8 @@ class OfflineAuth : ModInitializer {
 		// Player disconnect — cleanup
 		ServerPlayConnectionEvents.DISCONNECT.register { handler, _ ->
 			manager.onPlayerDisconnect(handler.player)
+			// Void any pending Bluesky pairing tokens for this player so they can't be reused.
+			blueskySessionStore?.voidByPlayer(handler.player.uuid)
 		}
 
 		// Block chat messages from unauthenticated players

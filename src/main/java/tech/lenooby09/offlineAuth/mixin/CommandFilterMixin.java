@@ -11,6 +11,8 @@ import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 import tech.lenooby09.offlineAuth.OfflineAuth;
+import tech.lenooby09.offlineAuth.auth.AuthManager;
+import tech.lenooby09.offlineAuth.auth.AuthMode;
 
 import java.util.Set;
 
@@ -54,13 +56,19 @@ public abstract class CommandFilterMixin {
             return;
         }
 
-        if (OfflineAuth.Companion.getAuthManager().isAuthenticated(player)) return;
+        AuthManager mgr = OfflineAuth.Companion.getAuthManager();
+        if (mgr.isAuthenticated(player)) return;
 
-        if (AUTH_COMMANDS.contains(cmd)) {
-            return;
-        }
+        boolean bluesky = mgr.getAuthMode() == AuthMode.BLUESKY;
+        boolean allowed = bluesky
+                ? (cmd.equals("bluesky") || cmd.equals("b"))
+                : AUTH_COMMANDS.contains(cmd);
+        if (allowed) return;
 
-        player.sendSystemMessage(Component.literal("§cYou must authenticate first. Use /register or /login"));
+        String hint = bluesky
+                ? "§cYou must authenticate first. Use /bluesky"
+                : "§cYou must authenticate first. Use /register or /login";
+        player.sendSystemMessage(Component.literal(hint));
         ci.cancel();
     }
 }

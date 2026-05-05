@@ -136,6 +136,8 @@ object AdminCommands {
 		authManager: AuthManager,
 		maxUses: Int
 	): Int {
+		if (authManager.denyIfBluesky(ctx.source)) return 0
+
 		val code = generateInviteCode(authManager.config.inviteCodeLength)
 
 		val createdBy = ctx.source.textName
@@ -149,6 +151,8 @@ object AdminCommands {
 	}
 
 	private fun listCodes(ctx: CommandContext<CommandSourceStack>, authManager: AuthManager): Int {
+		if (authManager.denyIfBluesky(ctx.source)) return 0
+
 		val codes = authManager.database.getActiveInviteCodes()
 
 		if (codes.isEmpty()) {
@@ -180,6 +184,8 @@ object AdminCommands {
 		ctx: CommandContext<CommandSourceStack>,
 		authManager: AuthManager
 	): Int {
+		if (authManager.denyIfBluesky(ctx.source)) return 0
+
 		val username = getString(ctx, "username")
 		val password = getString(ctx, "password")
 		val source = ctx.source
@@ -368,6 +374,8 @@ object AdminCommands {
 	}
 
 	private fun revokeCode(ctx: CommandContext<CommandSourceStack>, authManager: AuthManager): Int {
+		if (authManager.denyIfBluesky(ctx.source)) return 0
+
 		val code = getString(ctx, "code")
 		val success = authManager.database.revokeInviteCode(code)
 

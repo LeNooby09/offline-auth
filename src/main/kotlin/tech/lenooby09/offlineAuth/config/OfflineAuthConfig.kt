@@ -3,6 +3,7 @@ package tech.lenooby09.offlineAuth.config
 import tech.lenooby09.offlineAuth.OfflineAuth
 import java.nio.file.Files
 import java.nio.file.Path
+import java.security.MessageDigest
 
 data class OfflineAuthConfig(
 	val authTimeoutSeconds: Long = 60L,
@@ -30,7 +31,114 @@ data class OfflineAuthConfig(
 	val postgresDatabase: String = "offlineauth",
 	val postgresUser: String = "offlineauth",
 	val postgresPassword: String = "",
+	// Bluesky (ATProto) opt-in auth: when enabled the legacy /register, /login, /login_as,
+	// /changepassword, /2fa, and the invite-code admin subcommands are runtime-disabled and
+	// players authenticate via /bluesky instead. Defaults below leave the mod in password mode.
+	val blueskyEnabled: Boolean = false,
+	val blueskyWhitelistList: String = "",
+	val blueskyPublicUrl: String = "",
+	val blueskyClientName: String = "OfflineAuth Minecraft Server",
+	val blueskyScope: String = "atproto rpc:app.bsky.actor.getProfile?aud=did:web:api.bsky.app#bsky_appview",
+	val blueskyListCacheSeconds: Long = 300L,
+	val blueskyPairingTokenTtlMinutes: Long = 10L,
 ) {
+
+	/**
+	 * Stable, content-derived version tag for the published OAuth client
+	 * metadata document. Empty when no public URL is configured.
+	 *
+	 * Authorization Servers running `@atproto/oauth-provider` cache the
+	 * client metadata document keyed by `client_id` URL (default TTL: 10
+	 * minutes; see `clientMetadataCache` in `oauth-provider`). When operators
+	 * tweak Bluesky-related config (e.g. `bluesky-scope`,
+	 * `bluesky-client-name`) they would otherwise be hit by stale-cache
+	 * errors such as `invalid_scope: Scope "..." is not declared in the
+	 * client metadata` until the TTL expires. By embedding a hash of the
+	 * metadata-relevant fields in the published `client_id` URL we force
+	 * PDSes to treat any change as a brand-new client and re-fetch the
+	 * document, while keeping the URL stable across restarts when nothing
+	 * relevant has changed.
+	 */
+	val blueskyClientMetadataVersion: String
+		get() {
+			if (blueskyPublicUrl.isBlank()) return ""
+			val content = listOf(
+				blueskyScope,
+				blueskyClientName,
+				blueskyPublicUrl.trimEnd('/'),
+			).joinToString("|")
+			val digest = MessageDigest.getInstance("SHA-256")
+				.digest(content.toByteArray(Charsets.UTF_8))
+			return digest.joinToString("") { "%02x".format(it) }.take(8)
+		}
+
+	/**
+	 * Derived URL — never stored — used as the OAuth `client_id`.
+	 *
+	 * Includes a content-derived `?v=<hash>` query param so that PDSes which
+	 * cache client metadata by `client_id` (default 10 min in
+	 * `@atproto/oauth-provider`) bypass the cache the moment the operator
+	 * changes any metadata-relevant field. See [blueskyClientMetadataVersion].
+	 */
+	val blueskyClientId: String
+		get() {
+			val base = "${blueskyPublicUrl.trimEnd('/')}/oauth-client-metadata.json"
+			val version = blueskyClientMetadataVersion
+			return if (version.isEmpty()) base else "$base?v=$version"
+		}
+
+	/** Derived URL — never stored — used as the OAuth `redirect_uri`. */
+	val blueskyRedirectUri: String
+		get() = "${blueskyPublicUrl.trimEnd('/')}/bluesky/callback"
+
+	/**
+	 * Validates the Bluesky-related config keys. Returns `false` and emits warnings via
+	 * [OfflineAuth.LOGGER] when any required field is missing or insecure, so the caller
+	 * can fall back to password mode and keep the server usable.
+	 */
+	fun validateBlueskyConfig(): Boolean {
+		if (!blueskyEnabled) return false
+		var ok = true
+		if (blueskyPublicUrl.isBlank()) {
+			OfflineAuth.LOGGER.warn(
+				"[Bluesky] bluesky-enabled is true but bluesky-public-url is empty — falling back to password mode."
+			)
+			ok = false
+		} else {
+			val lower = blueskyPublicUrl.lowercase()
+			val isHttps = lower.startsWith("https://")
+			val isLoopback = lower.startsWith("http://127.0.0.1") ||
+				lower.startsWith("http://localhost") ||
+				lower.startsWith("http://[::1]")
+			if (!isHttps && !isLoopback) {
+				OfflineAuth.LOGGER.warn(
+					"[Bluesky] bluesky-public-url is not HTTPS (and not a loopback address) — " +
+						"ATProto rejects non-loopback http client_ids. Falling back to password mode."
+				)
+				ok = false
+			}
+		}
+		if (blueskyWhitelistList.isBlank()) {
+			OfflineAuth.LOGGER.warn(
+				"[Bluesky] bluesky-enabled is true but bluesky-whitelist-list is empty — falling back to password mode."
+			)
+			ok = false
+		}
+		// `transition:generic` is the deprecated legacy ATProto OAuth grant grammar. It is rejected at
+		// startup so misconfigured upgrades fall back to password mode (loud-but-graceful) instead of
+		// silently pinning the deployment to the deprecated grant. Detection is whole-token,
+		// case-insensitive — substring matches inside unrelated tokens are not flagged.
+		val scopeTokens = blueskyScope.split(Regex("\\s+")).filter { it.isNotBlank() }
+		if (scopeTokens.any { it.equals("transition:generic", ignoreCase = true) }) {
+			OfflineAuth.LOGGER.warn(
+				"[Bluesky] bluesky-scope contains the deprecated 'transition:generic' grant; " +
+					"replace it with 'atproto rpc:app.bsky.actor.getProfile?aud=did:web:api.bsky.app#bsky_appview' " +
+					"(or another rpc:... lexicon-permission scope) and restart. Falling back to password mode."
+			)
+			ok = false
+		}
+		return ok
+	}
 
 	companion object {
 
@@ -62,6 +170,13 @@ data class OfflineAuthConfig(
 			"postgres-database" to "# PostgreSQL database name",
 			"postgres-user" to "# PostgreSQL username",
 			"postgres-password" to "# PostgreSQL password",
+			"bluesky-enabled" to "# Opt-in: enable Bluesky (ATProto) OAuth login. When true, legacy password commands are runtime-disabled and players use /bluesky.",
+			"bluesky-whitelist-list" to "# Bluesky list reference (an at://... URI or a https://bsky.app/profile/<handle-or-did>/lists/<rkey> URL). Members of this list may log in.",
+			"bluesky-public-url" to "# Public HTTPS base URL the OAuth callback is reachable at (e.g. https://auth.example.com). Loopback http://127.0.0.1 is allowed for dev only.",
+			"bluesky-client-name" to "# Display name shown to users on the Bluesky consent screen",
+			"bluesky-scope" to "# OAuth scopes requested. Must include 'atproto'. Default 'atproto rpc:app.bsky.actor.getProfile?aud=did:web:api.bsky.app#bsky_appview' uses the modern lexicon-permission grammar (only the AppView proxy call OfflineAuth needs). The legacy 'transition:generic' grant is deprecated and rejected at startup; if your scope still contains it the server falls back to password mode and logs a migration hint. Operators stuck on an older PDS that only understands 'transition:generic' should pin a previous OfflineAuth release.",
+			"bluesky-list-cache-seconds" to "# How long to cache the Bluesky list members before re-fetching (default: 300 = 5 minutes)",
+			"bluesky-pairing-token-ttl-minutes" to "# How long an in-game /bluesky pairing token stays valid before it expires (default: 10 minutes)",
 		)
 
 		fun load(configDir: Path): OfflineAuthConfig {
@@ -114,6 +229,13 @@ data class OfflineAuthConfig(
 					postgresDatabase = values["postgres-database"] ?: "offlineauth",
 					postgresUser = values["postgres-user"] ?: "offlineauth",
 					postgresPassword = values["postgres-password"] ?: "",
+					blueskyEnabled = values["bluesky-enabled"]?.toBooleanStrictOrNull() ?: false,
+					blueskyWhitelistList = values["bluesky-whitelist-list"] ?: "",
+					blueskyPublicUrl = values["bluesky-public-url"] ?: "",
+					blueskyClientName = values["bluesky-client-name"] ?: "OfflineAuth Minecraft Server",
+					blueskyScope = values["bluesky-scope"] ?: "atproto rpc:app.bsky.actor.getProfile?aud=did:web:api.bsky.app#bsky_appview",
+					blueskyListCacheSeconds = values["bluesky-list-cache-seconds"]?.toLongOrNull() ?: 300L,
+					blueskyPairingTokenTtlMinutes = values["bluesky-pairing-token-ttl-minutes"]?.toLongOrNull() ?: 10L,
 				)
 			} catch (e: Exception) {
 				OfflineAuth.LOGGER.error("Failed to load config, using defaults", e)
@@ -155,6 +277,13 @@ data class OfflineAuthConfig(
 			"postgres-database" to postgresDatabase,
 			"postgres-user" to postgresUser,
 			"postgres-password" to postgresPassword,
+			"bluesky-enabled" to blueskyEnabled.toString(),
+			"bluesky-whitelist-list" to blueskyWhitelistList,
+			"bluesky-public-url" to blueskyPublicUrl,
+			"bluesky-client-name" to blueskyClientName,
+			"bluesky-scope" to blueskyScope,
+			"bluesky-list-cache-seconds" to blueskyListCacheSeconds.toString(),
+			"bluesky-pairing-token-ttl-minutes" to blueskyPairingTokenTtlMinutes.toString(),
 		)
 
 		val builder = StringBuilder()

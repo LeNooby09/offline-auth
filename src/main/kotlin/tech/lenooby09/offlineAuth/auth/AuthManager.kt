@@ -1,6 +1,7 @@
 package tech.lenooby09.offlineAuth.auth
 
 import com.mojang.authlib.GameProfile
+import net.minecraft.commands.CommandSourceStack
 import net.minecraft.nbt.CompoundTag
 import net.minecraft.nbt.NbtIo
 import net.minecraft.network.chat.Component
@@ -45,7 +46,26 @@ import java.util.concurrent.Executors
 import java.util.concurrent.ScheduledFuture
 import java.util.concurrent.TimeUnit
 
+/**
+ * Which authentication mode the server is running in for the lifetime of this process.
+ * Set once at boot from `bluesky-enabled` (and the corresponding `validateBlueskyConfig`
+ * check); switching modes requires a restart, just like other config keys.
+ */
+enum class AuthMode { PASSWORD, BLUESKY }
+
 class AuthManager(val database: DatabaseManager, var config: OfflineAuthConfig) {
+
+	/**
+	 * Effective authentication mode. Defaults to [AuthMode.PASSWORD]; flipped to
+	 * [AuthMode.BLUESKY] once at boot if `bluesky-enabled=true` and
+	 * [OfflineAuthConfig.validateBlueskyConfig] passes. Validation failure leaves
+	 * the server in password mode so it stays usable.
+	 */
+	val authMode: AuthMode = if (config.blueskyEnabled && config.validateBlueskyConfig()) {
+		AuthMode.BLUESKY
+	} else {
+		AuthMode.PASSWORD
+	}
 
 	val authStates = ConcurrentHashMap<UUID, AuthState>()
 	val accountMap = ConcurrentHashMap<UUID, AuthAccount>()
@@ -95,6 +115,19 @@ class AuthManager(val database: DatabaseManager, var config: OfflineAuthConfig) 
 
 	fun isAuthenticated(uuid: UUID): Boolean {
 		return authStates[uuid] == AuthState.AUTHENTICATED
+	}
+
+	/**
+	 * Runtime guard for the legacy password commands. When [authMode] is [AuthMode.BLUESKY],
+	 * sends a friendly chat message explaining that the command is disabled and returns `true`,
+	 * so callers can `return@executes 0`. Returns `false` (do nothing) when in password mode.
+	 */
+	fun denyIfBluesky(source: CommandSourceStack): Boolean {
+		if (authMode != AuthMode.BLUESKY) return false
+		source.sendSystemMessage(
+			Component.literal("§cThis command is disabled — Bluesky auth is enabled. Use /bluesky.")
+		)
+		return true
 	}
 
 	fun onPlayerJoin(player: ServerPlayer, server: MinecraftServer) {
@@ -203,9 +236,13 @@ class AuthManager(val database: DatabaseManager, var config: OfflineAuthConfig) 
 
 		player.sendSystemMessage(Component.empty())
 		player.sendSystemMessage(Component.literal("§7You have §c${config.authTimeoutSeconds} seconds §7to authenticate."))
-		player.sendSystemMessage(Component.literal("§7Use §a/register <invite_code> <username> <password>"))
-		player.sendSystemMessage(Component.literal("§7  or §a/login <password>"))
-		player.sendSystemMessage(Component.literal("§7  or §a/login_as <username> <password>"))
+		if (authMode == AuthMode.BLUESKY) {
+			player.sendSystemMessage(Component.literal("§7Run §a/bluesky§7 to authenticate via your Bluesky account."))
+		} else {
+			player.sendSystemMessage(Component.literal("§7Use §a/register <invite_code> <username> <password>"))
+			player.sendSystemMessage(Component.literal("§7  or §a/login <password>"))
+			player.sendSystemMessage(Component.literal("§7  or §a/login_as <username> <password>"))
+		}
 		player.sendSystemMessage(Component.empty())
 
 		startKickTimer(player, server)
@@ -405,6 +442,79 @@ class AuthManager(val database: DatabaseManager, var config: OfflineAuthConfig) 
 		// Broadcast delayed join message if configured
 		if (config.hideJoinMessageUntilLogin) {
 			broadcastJoinMessage(player, account.username)
+		}
+	}
+
+	/**
+	 * Finalizes a successful Bluesky OAuth callback. Looks up (or creates) the
+	 * account linked to [did], persists the link, and dispatches
+	 * [onAuthenticated] back to the server tick thread.
+	 *
+	 * Safe to call from a Ktor coroutine — all DB I/O happens here, and the
+	 * Minecraft-state mutation hops back to the main thread via
+	 * `MinecraftServer.execute { ... }`.
+	 */
+	fun handleBlueskyLogin(playerUuid: UUID, did: String, handle: String, avatar: String?) {
+		if (authMode != AuthMode.BLUESKY) {
+			throw IllegalStateException("handleBlueskyLogin called while authMode=$authMode")
+		}
+
+		val player = server?.playerList?.getPlayer(playerUuid)
+			?: throw IllegalStateException("Player $playerUuid is no longer connected")
+
+		val existing = database.getAccountByDid(did)
+		val account = if (existing != null) {
+			// Idempotent: refresh the link row (handle/avatar may have changed) but keep accountId.
+			database.linkBluesky(existing.id, did, handle, avatar)
+			existing
+		} else {
+			val username = generateUniqueUsernameForHandle(handle)
+			val newAccount = AuthAccount(
+				id = UUID.randomUUID(),
+				username = username,
+				passwordHash = null,
+				registeredAt = System.currentTimeMillis(),
+				isDashboardAdmin = false,
+			)
+			database.saveAccount(newAccount)
+			database.linkBluesky(newAccount.id, did, handle, avatar)
+			OfflineAuth.LOGGER.info("[Bluesky] Created new account '{}' for did={}", username, did)
+			newAccount
+		}
+
+		// Hop to main thread for the actual onAuthenticated finalization.
+		val srv = server ?: return
+		srv.execute {
+			val livePlayer = srv.playerList.getPlayer(playerUuid) ?: return@execute
+			database.linkMinecraftAccount(livePlayer.uuid, account.id)
+			onAuthenticated(livePlayer, account)
+			livePlayer.sendSystemMessage(
+				Component.literal("§aLogged in as §e${account.username}§a (Bluesky: §b@${handle}§a).")
+			)
+		}
+	}
+
+	/**
+	 * Generates a unique Minecraft username from a Bluesky handle: take the
+	 * first segment, sanitize to `[a-zA-Z0-9_]`, truncate to 16 chars, then
+	 * append a numeric suffix on collision.
+	 */
+	private fun generateUniqueUsernameForHandle(handle: String): String {
+		val firstSegment = handle.substringBefore('.', missingDelimiterValue = handle)
+		val sanitized = firstSegment.replace(Regex("[^a-zA-Z0-9_]"), "")
+			.ifBlank { "bsky" }
+		val base = sanitized.take(16)
+		if (database.getAccountByUsername(base) == null) return base
+		var suffix = 2
+		while (true) {
+			val suffixStr = suffix.toString()
+			val candidate = base.take(16 - suffixStr.length) + suffixStr
+			if (database.getAccountByUsername(candidate) == null) return candidate
+			suffix++
+			if (suffix > 9999) {
+				// Defensive cap — fall back to a UUID-suffixed name.
+				return (base.take(8) + "_" + UUID.randomUUID().toString().take(7)).take(16)
+			}
 		}
 	}
 

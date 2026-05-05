@@ -60,6 +60,8 @@ object TwoFactorCommand {
 	}
 
 	private fun executeSetup(ctx: CommandContext<CommandSourceStack>, authManager: AuthManager): Int {
+		if (authManager.denyIfBluesky(ctx.source)) return 0
+
 		val player = ctx.source.playerOrException
 
 		if (!authManager.isAuthenticated(player)) {
@@ -129,6 +131,8 @@ object TwoFactorCommand {
 	}
 
 	private fun executeConfirm(ctx: CommandContext<CommandSourceStack>, authManager: AuthManager): Int {
+		if (authManager.denyIfBluesky(ctx.source)) return 0
+
 		val player = ctx.source.playerOrException
 		val code = getString(ctx, "code")
 
@@ -166,6 +170,8 @@ object TwoFactorCommand {
 	}
 
 	private fun executeDisable(ctx: CommandContext<CommandSourceStack>, authManager: AuthManager): Int {
+		if (authManager.denyIfBluesky(ctx.source)) return 0
+
 		val player = ctx.source.playerOrException
 		val code = getString(ctx, "code")
 
@@ -204,6 +210,8 @@ object TwoFactorCommand {
 	}
 
 	private fun executeVerify(ctx: CommandContext<CommandSourceStack>, authManager: AuthManager): Int {
+		if (authManager.denyIfBluesky(ctx.source)) return 0
+
 		val player = ctx.source.playerOrException
 		val code = getString(ctx, "code")
 
@@ -237,6 +245,8 @@ object TwoFactorCommand {
 	}
 
 	private fun executeStatus(ctx: CommandContext<CommandSourceStack>, authManager: AuthManager): Int {
+		if (authManager.denyIfBluesky(ctx.source)) return 0
+
 		val player = ctx.source.playerOrException
 
 		if (!authManager.isAuthenticated(player)) {
