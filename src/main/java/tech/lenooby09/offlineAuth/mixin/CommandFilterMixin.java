@@ -1,7 +1,7 @@
 package tech.lenooby09.offlineAuth.mixin;
 
 import net.minecraft.network.chat.Component;
-import net.minecraft.network.chat.LastSeenMessages;
+import net.minecraft.network.protocol.game.ServerboundChatCommandPacket;
 import net.minecraft.network.protocol.game.ServerboundChatCommandSignedPacket;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.server.network.ServerGamePacketListenerImpl;
@@ -22,13 +22,13 @@ public abstract class CommandFilterMixin {
     @Shadow
     public abstract ServerPlayer getPlayer();
 
-    @Inject(method = "performUnsignedChatCommand", at = @At("HEAD"), cancellable = true)
-    private void onUnsignedCommand(String command, CallbackInfo ci) {
-        filterCommand(command, ci);
+    @Inject(method = "handleChatCommand", at = @At("HEAD"), cancellable = true)
+    private void onUnsignedCommand(ServerboundChatCommandPacket packet, CallbackInfo ci) {
+        filterCommand(packet.command(), ci);
     }
 
-    @Inject(method = "performSignedChatCommand", at = @At("HEAD"), cancellable = true)
-    private void onSignedCommand(ServerboundChatCommandSignedPacket packet, LastSeenMessages lastSeenMessages, CallbackInfo ci) {
+    @Inject(method = "handleSignedChatCommand", at = @At("HEAD"), cancellable = true)
+    private void onSignedCommand(ServerboundChatCommandSignedPacket packet, CallbackInfo ci) {
         filterCommand(packet.command(), ci);
     }
 
