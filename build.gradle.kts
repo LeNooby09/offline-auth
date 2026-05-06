@@ -84,6 +84,8 @@ dependencies {
 	include(implementation("io.ktor:ktor-client-core:$ktorVersion")!!)
 	include(implementation("io.ktor:ktor-client-cio:$ktorVersion")!!)
 	include(implementation("io.ktor:ktor-client-content-negotiation:$ktorVersion")!!)
+	include(implementation("io.ktor:ktor-network-tls:$ktorVersion")!!)
+	include(implementation("io.ktor:ktor-websockets:$ktorVersion")!!)
 
 	// Nimbus JOSE+JWT (for DPoP key generation/proof in ATProto OAuth)
 	include(implementation("com.nimbusds:nimbus-jose-jwt:10.0.1")!!)
