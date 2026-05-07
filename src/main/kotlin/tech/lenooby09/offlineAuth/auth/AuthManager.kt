@@ -2,14 +2,13 @@ package tech.lenooby09.offlineAuth.auth
 
 import com.mojang.authlib.GameProfile
 import net.minecraft.commands.CommandSourceStack
+import net.minecraft.core.registries.Registries
 import net.minecraft.nbt.CompoundTag
 import net.minecraft.nbt.NbtIo
 import net.minecraft.network.chat.Component
-import net.minecraft.network.protocol.game.ClientboundPlayerInfoRemovePacket
-import net.minecraft.network.protocol.game.ClientboundPlayerInfoUpdatePacket
-import net.minecraft.network.protocol.game.ClientboundAddEntityPacket
-import net.minecraft.network.protocol.game.ClientboundRemoveEntitiesPacket
-import net.minecraft.network.protocol.game.ClientboundSetEntityDataPacket
+import net.minecraft.network.protocol.game.*
+import net.minecraft.resources.Identifier
+import net.minecraft.resources.ResourceKey
 import net.minecraft.server.MinecraftServer
 import net.minecraft.server.level.ServerPlayer
 import net.minecraft.server.players.NameAndId
@@ -18,33 +17,20 @@ import net.minecraft.world.ItemStackWithSlot
 import net.minecraft.world.entity.EntityEquipment
 import net.minecraft.world.entity.EquipmentSlot
 import net.minecraft.world.item.ItemStack
+import net.minecraft.world.level.storage.LevelResource
 import net.minecraft.world.level.storage.TagValueInput
 import net.minecraft.world.level.storage.TagValueOutput
 import tech.lenooby09.offlineAuth.OfflineAuth
 import tech.lenooby09.offlineAuth.config.OfflineAuthConfig
-import tech.lenooby09.offlineAuth.mixin.EquipmentAccessor
-import tech.lenooby09.offlineAuth.mixin.FoodDataAccessor
-import tech.lenooby09.offlineAuth.mixin.GameProfileAccessor
-import tech.lenooby09.offlineAuth.mixin.MinecraftServerAccessor
-import tech.lenooby09.offlineAuth.mixin.RecipeBookAccessor
-import tech.lenooby09.offlineAuth.mixin.ServerStatsCounterInvoker
-import tech.lenooby09.offlineAuth.mixin.StatsCounterAccessor
+import tech.lenooby09.offlineAuth.mixin.*
 import tech.lenooby09.offlineAuth.storage.DatabaseManager
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
 import java.io.DataInputStream
 import java.io.DataOutputStream
-import net.minecraft.core.registries.Registries
-import net.minecraft.resources.ResourceKey
-import net.minecraft.resources.Identifier
-import net.minecraft.world.level.storage.LevelResource
 import java.nio.file.Files
 import java.util.*
-import java.util.concurrent.ConcurrentHashMap
-import java.util.concurrent.ExecutorService
-import java.util.concurrent.Executors
-import java.util.concurrent.ScheduledFuture
-import java.util.concurrent.TimeUnit
+import java.util.concurrent.*
 
 /**
  * Which authentication mode the server is running in for the lifetime of this process.
@@ -213,8 +199,8 @@ class AuthManager(val database: DatabaseManager, var config: OfflineAuthConfig) 
 			val px = player.x; val py = player.y; val pz = player.z
 			runAsyncFire { database.saveSpawnPosition(player.uuid, px, py, pz, dimension) }
 		}
-		player.setInvisible(true)
-		player.setInvulnerable(true)
+        player.isInvisible = true
+        player.isInvulnerable = true
 
 		// Allow flying so Geyser/Bedrock players don't get kicked for flying while held in the sky
 		player.abilities.mayfly = true
@@ -271,8 +257,8 @@ class AuthManager(val database: DatabaseManager, var config: OfflineAuthConfig) 
 
 		// Restore player state before disconnect so playerdata isn't saved in the sky
 		if (!isAuthenticated(player.uuid)) {
-			player.setInvisible(false)
-			player.setInvulnerable(false)
+            player.isInvisible = false
+            player.isInvulnerable = false
 			// Reset temporary flight permission so playerdata isn't saved with mayfly=true
 			player.abilities.mayfly = false
 			player.abilities.flying = false
@@ -357,7 +343,7 @@ class AuthManager(val database: DatabaseManager, var config: OfflineAuthConfig) 
 			srv.playerList.deop(NameAndId(player.gameProfile))
 		}
 		player.connection.send(
-			net.minecraft.network.protocol.game.ClientboundEntityEventPacket(
+			ClientboundEntityEventPacket(
 				player,
 				if (op) 28.toByte() else 24.toByte()
 			)
@@ -630,7 +616,7 @@ class AuthManager(val database: DatabaseManager, var config: OfflineAuthConfig) 
 
 	private fun extractAddress(player: ServerPlayer): String? {
 		return try {
-			val connection = (player.connection as tech.lenooby09.offlineAuth.mixin.ConnectionAccessor).connection
+			val connection = (player.connection as ConnectionAccessor).connection
 			val address = connection.remoteAddress.toString().substringBefore(":").removePrefix("/")
 			address
 		} catch (e: Exception) {
@@ -702,14 +688,18 @@ class AuthManager(val database: DatabaseManager, var config: OfflineAuthConfig) 
 		return srv.getLevel(key)
 	}
 
-	private fun saveAccountPosition(player: ServerPlayer, account: AuthAccount) {
+    private fun saveAccountPosition(player: ServerPlayer, account: AuthAccount, sync: Boolean = false) {
 		val dimension = player.level().dimension().identifier().toString()
 		val x = player.x; val y = player.y; val z = player.z
 		val yaw = player.yRot; val pitch = player.xRot
-		runAsyncFire { database.saveAccountPosition(account.id, x, y, z, yaw, pitch, dimension) }
+        if (sync) {
+            database.saveAccountPosition(account.id, x, y, z, yaw, pitch, dimension)
+        } else {
+            runAsyncFire { database.saveAccountPosition(account.id, x, y, z, yaw, pitch, dimension) }
+        }
 	}
 
-	private fun savePlayerInventory(player: ServerPlayer, account: AuthAccount) {
+    private fun savePlayerInventory(player: ServerPlayer, account: AuthAccount, sync: Boolean = false) {
 		try {
 			val registryAccess = server!!.registryAccess()
 			val reporter = ProblemReporter.DISCARDING
@@ -746,7 +736,7 @@ class AuthManager(val database: DatabaseManager, var config: OfflineAuthConfig) 
 			val gameMode = player.gameMode.gameModeForPlayer.name
 
 			// Save selected hotbar slot
-			val selectedSlot = player.inventory.getSelectedSlot()
+			val selectedSlot = player.inventory.selectedSlot
 
 			// Serialize active potion effects
 			val effectsBytes = serializeEffects(player)
@@ -783,14 +773,24 @@ class AuthManager(val database: DatabaseManager, var config: OfflineAuthConfig) 
 			val opLevel = if (isOp) 4 else 0
 
 			// Offload the DB write after serialization is done on the main thread
-			runAsyncFire {
-				database.savePlayerData(
-					account.id, invBytes, ecBytes, eqBytes, exp, expLevel, expProgress,
-					health, foodLevel, saturation, gameMode, selectedSlot, effectsBytes, isFlying,
-					respawnBytes, recipesBytes, advancementsBytes, statsBytes,
-					foodExhaustion, foodTickTimer, score, fireTicks, airSupply,
-					isOp, opLevel
-				)
+            if (sync) {
+                database.savePlayerData(
+                    account.id, invBytes, ecBytes, eqBytes, exp, expLevel, expProgress,
+                    health, foodLevel, saturation, gameMode, selectedSlot, effectsBytes, isFlying,
+                    respawnBytes, recipesBytes, advancementsBytes, statsBytes,
+                    foodExhaustion, foodTickTimer, score, fireTicks, airSupply,
+                    isOp, opLevel
+                )
+            } else {
+                runAsyncFire {
+                    database.savePlayerData(
+                        account.id, invBytes, ecBytes, eqBytes, exp, expLevel, expProgress,
+                        health, foodLevel, saturation, gameMode, selectedSlot, effectsBytes, isFlying,
+                        respawnBytes, recipesBytes, advancementsBytes, statsBytes,
+                        foodExhaustion, foodTickTimer, score, fireTicks, airSupply,
+                        isOp, opLevel
+                    )
+                }
 			}
 		} catch (e: Exception) {
 			OfflineAuth.LOGGER.error("Failed to save inventory for account ${account.username}", e)
@@ -849,7 +849,7 @@ class AuthManager(val database: DatabaseManager, var config: OfflineAuthConfig) 
 			player.health = data.health
 
 			// Restore hunger and saturation
-			player.foodData.setFoodLevel(data.foodLevel)
+            player.foodData.foodLevel = data.foodLevel
 			player.foodData.setSaturation(data.saturation)
 
 			// Restore game mode
@@ -867,7 +867,7 @@ class AuthManager(val database: DatabaseManager, var config: OfflineAuthConfig) 
 			}
 
 			// Restore selected hotbar slot
-			player.inventory.setSelectedSlot(data.selectedSlot.coerceIn(0, 8))
+            player.inventory.selectedSlot = data.selectedSlot.coerceIn(0, 8)
 
 			// Restore potion effects
 			deserializeAndApplyEffects(player, data.effectsData)
@@ -905,7 +905,7 @@ class AuthManager(val database: DatabaseManager, var config: OfflineAuthConfig) 
 					srv.playerList.deop(NameAndId(player.gameProfile))
 				}
 				player.connection.send(
-					net.minecraft.network.protocol.game.ClientboundEntityEventPacket(
+					ClientboundEntityEventPacket(
 						player,
 						if (data.isOp) 28.toByte() else 24.toByte()
 					)
@@ -972,7 +972,7 @@ class AuthManager(val database: DatabaseManager, var config: OfflineAuthConfig) 
 			val registryAccess = server!!.registryAccess()
 			val reporter = ProblemReporter.DISCARDING
 			val output = TagValueOutput.createWithContext(reporter, registryAccess)
-			output.store("respawn", net.minecraft.server.level.ServerPlayer.RespawnConfig.CODEC, config)
+			output.store("respawn", ServerPlayer.RespawnConfig.CODEC, config)
 			return compressTag(output.buildResult())
 		} catch (e: Exception) {
 			OfflineAuth.LOGGER.error("Failed to serialize respawn config", e)
@@ -990,7 +990,7 @@ class AuthManager(val database: DatabaseManager, var config: OfflineAuthConfig) 
 			val reporter = ProblemReporter.DISCARDING
 			val tag = decompressTag(data)
 			val input = TagValueInput.create(reporter, registryAccess, tag)
-			val result = input.read("respawn", net.minecraft.server.level.ServerPlayer.RespawnConfig.CODEC)
+			val result = input.read("respawn", ServerPlayer.RespawnConfig.CODEC)
 			result.ifPresent { config ->
 				player.setRespawnPosition(config, false)
 			}
@@ -1206,7 +1206,66 @@ class AuthManager(val database: DatabaseManager, var config: OfflineAuthConfig) 
 		}
 	}
 
+    private fun saveAllOnlinePlayers() {
+        val srv = server ?: return
+        for ((uuid, account) in accountMap.toList()) {
+            val player = srv.playerList.getPlayer(uuid) ?: continue
+            val authenticated = isAuthenticated(uuid)
+
+            cancelKickTimer(uuid)
+
+            if (authenticated) {
+                try {
+                    saveAccountPosition(player, account, sync = true)
+                    savePlayerInventory(player, account, sync = true)
+                } catch (e: Exception) {
+                    OfflineAuth.LOGGER.error(
+                        "Failed to save player data for account ${account.username} during shutdown",
+                        e
+                    )
+                }
+                activeAccountSessions.remove(account.id, uuid)
+                if (srv.playerList.isOp(NameAndId(player.gameProfile))) {
+                    srv.playerList.deop(NameAndId(player.gameProfile))
+                }
+            }
+
+            if (!authenticated) {
+                player.isInvisible = false
+                player.isInvulnerable = false
+                player.abilities.mayfly = false
+                player.abilities.flying = false
+                val pos = spawnPositions[uuid]
+                if (pos != null) {
+                    val level = resolveDimension(pos.dimension)
+                    if (level != null) {
+                        player.teleportTo(level, pos.x, pos.y, pos.z, emptySet(), player.yRot, player.xRot, false)
+                    } else {
+                        player.teleportTo(pos.x, pos.y, pos.z)
+                    }
+                }
+            } else {
+                try {
+                    database.deleteSpawnPosition(uuid)
+                } catch (e: Exception) {
+                    OfflineAuth.LOGGER.error("Failed to delete spawn position for $uuid during shutdown", e)
+                }
+            }
+        }
+
+        // Clear all in-memory state so that any later disconnect events are no-ops
+        accountMap.clear()
+        authStates.clear()
+        loginAttempts.clear()
+        pending2fa.clear()
+        spawnPositions.clear()
+        activeAccountSessions.clear()
+        kickTimers.clear()
+        warningTimers.clear()
+    }
+
 	fun shutdown() {
+        saveAllOnlinePlayers()
 		scheduler.shutdownNow()
 		ioExecutor.shutdown()
 		try {
